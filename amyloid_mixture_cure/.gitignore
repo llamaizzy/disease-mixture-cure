@@ -1,0 +1,8 @@
+results/*.rds
+results/*.log
+.Rproj.user
+.Rhistory
+.RData
+.httr-oauth
+.DS_Store
+.quarto
