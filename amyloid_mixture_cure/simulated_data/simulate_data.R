@@ -1,4 +1,4 @@
-# OUTLINE FOR SIMULATING DATA
+# OUTLINE FOR GENERATING SIMULATION DATA
 
 # Pipeline: truth (posterior medians) + design data (resample real data/distribution)
 # -> generate latent quantities per subject (random)
@@ -8,7 +8,7 @@
 # -> save in rds files
 
 ###############################################
-# TRUTH: posterior medians for population parameters
+# 1. TRUTH: posterior medians for population parameters
 ################################################
 # Source: data/fitted_posterior.rds (use $g = 252 pooled draws x 33 params)
 # Extract: phi[1:3], gamma[1:3], sigma_alpha, psi[1:2], sigma_delta, mu_b, sigma_b, theta[1:10], nu[1:8]
@@ -33,7 +33,7 @@ get_baseline_truth <- function(path="data/fitted_posterior.rds") {
 }
 
 ########################################
-# SCENARIOS 
+# 2. SCENARIOS 
 ########################################
 # Each scenarios is baseline truth with one modification
 #   baseline: no change
@@ -55,7 +55,7 @@ make_scenarios <- function(truth) {
   # return name list of modified truth lists
 }
 #######################################
-# DESIGN: Covariates + visited ages 
+# 3. DESIGN: Covariates + visited ages 
 ######################################
 # Covariates drawn independently each subject:
 #   APOE4 ~ Bernoulli(0.407) 
@@ -66,6 +66,7 @@ make_scenarios <- function(truth) {
 # num subjects = 1101
 # num obs = sample from visit ranges based on probability --> mean of 3 scans
 # gap between scans (n_obs - 1 gaps): two-part mixture with 0.76 probability of normal(2.05, 0.15), otherwise ~2.5 + exp(mean=1)
+#   old gap = pmax(rnorm(Ji - 1, visit_gap_mean, visit_gap_sd), min_gap)
 # visit ages = baseline age + cumulative sum of gaps
 # write visit ages into age_mat, padding with 0s after
 # CHECK: simulated follow-up length (last scan age - first) = max ~14, median ~4
@@ -82,7 +83,7 @@ get_design <- function(N = 1101, p_apoe4 = 0.407, p_female = 0.489,
   X <- cbin(apoe = apoe4 - x_centre["apoe"], female = female - x_centre["female"])
   
   # baseline age
-  base_age <- rnorm(N, 72.5, 7.4)
+  base_age <- rnorm(N, age_mean, age_sd) # add truncation?
   num_obs <- 
   max_n <- max(visits_range)
  
@@ -97,7 +98,7 @@ get_design <- function(N = 1101, p_apoe4 = 0.407, p_female = 0.489,
 }
 
 #######################################
-# CURVES implied by the truth 
+# 4. CURVES implied by the truth 
 ######################################
 # Rate curve + clock: bA <- make_rate_basis()
 #                     r <- rate_grid(bA, truth$theta)
@@ -200,4 +201,4 @@ simulate_one <- function(truth, N = NULL, seed) {
 #########################################
 # Simulate
 #########################################
-# 
+# Generate different scenarios and replicates
