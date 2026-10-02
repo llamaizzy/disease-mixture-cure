@@ -188,15 +188,13 @@ truth_curves <- function(truth) {
 
 # Accumulator trajectory at each visit; -Inf where the clock runs off the grid
 accum_levels <- function(alpha, delta, design, curves, mu_b) {
-  bA <- curves$bA
-  Gb <- sa_interp(bA$y, curves$G, mu_b)
-  A  <- matrix(0, design$n_subj, ncol(design$age_mat))
-  for (i in seq_len(design$n_subj)) {
-    j <- seq_len(design$n_obs[i])
-    g <- pmax(Gb + exp(delta[i]) * (design$age_mat[i, j] - alpha[i]), Gb)
-    a <- sa_inv_monotone(bA$y, curves$G, g)
-    A[i, j] <- ifelse(is.na(a), -Inf, a)
-  }
+  bA  <- curves$bA
+  Gb  <- sa_interp(bA$y, curves$G, mu_b)
+  obs <- col(design$age_mat) <= design$n_obs               # real visits, not padding
+  g   <- pmax(Gb + exp(delta) * (design$age_mat - alpha), Gb)
+  a   <- sa_inv_monotone(bA$y, curves$G, g[obs])
+  A   <- matrix(0, design$n_subj, ncol(design$age_mat))
+  A[obs] <- ifelse(is.na(a), -Inf, a)
   A
 }
 
@@ -220,28 +218,25 @@ draw_latent <- function(truth, design, curves, S = SETTINGS, max_redraw = 50L) {
   speed  <- function(z, k) as.numeric(design$X[k, , drop = FALSE] %*% truth$psi) +
     truth$sigma_delta * z
 
-  all_i <- seq_len(N)
-  alpha <- draw_onset(all_i); z <- draw_z(all_i); delta <- speed(z, all_i)
-  A_acc <- accum_levels(alpha, delta, design, curves, truth$mu_b)
-
   # The model gives zero density to a subject whose accumulator trajectory
   # leaves the grid (in either branch), so those are redrawn, and counted.
-  off <- which(apply(A_acc, 1, function(a) any(a == -Inf)))
-  n_offgrid <- length(off); it <- 0L
-  while (length(off) > 0 && it < max_redraw) {
-    alpha[off] <- draw_onset(off); z[off] <- draw_z(off); delta[off] <- speed(z[off], off)
-    A_acc <- accum_levels(alpha, delta, design, curves, truth$mu_b)
-    off <- which(apply(A_acc, 1, function(a) any(a == -Inf))); it <- it + 1L
+  alpha <- z <- delta <- numeric(N)
+  todo <- seq_len(N)
+  for (it in 0:max_redraw) {
+    alpha[todo] <- draw_onset(todo); z[todo] <- draw_z(todo); delta[todo] <- speed(z[todo], todo)
+    A_mat <- accum_levels(alpha, delta, design, curves, truth$mu_b)
+    todo  <- which(rowSums(A_mat == -Inf) > 0)
+    if (it == 0L) n_offgrid <- length(todo)
+    if (!length(todo)) break
   }
-  if (length(off) > 0) stop(sprintf("%d subjects still off the grid after %d redraws",
-                                    length(off), max_redraw))
+  if (length(todo)) stop(sprintf("%d subjects still off the grid after %d redraws",
+                                 length(todo), max_redraw))
 
   # true level at each visit: the trajectory if Z = 1, flat at b_i if Z = 0
-  A_mat <- A_acc
   for (i in which(Z == 0)) A_mat[i, seq_len(design$n_obs[i])] <- b[i]
 
   list(Z = Z, pi = pi_i, alpha = alpha, delta = delta, z = z, b = b,
-       A_mat = A_mat, A_acc = A_acc, n_offgrid = n_offgrid)
+       A_mat = A_mat, n_offgrid = n_offgrid)
 }
 
 #########################################
@@ -391,70 +386,86 @@ check_dat <- function(dat, latent, real_path = "data/adni_amyloid.rds",
   invisible(res)
 }
 
-# Simulated vs real, side by side. Look at this BEFORE fitting anything.
-plot_sim_check <- function(sim, real_path = "data/adni_amyloid.rds",
-                           file = "simulated_data/figures/sim_check_baseline.pdf",
-                           S = SETTINGS) {
+# ---- pieces shared by the two check plots
+sim_theme <- function() theme_minimal(base_size = 8.5) +
+  theme(plot.title = element_text(face = "bold", size = 9),
+        plot.subtitle = element_text(size = 6.8, colour = "grey30"),
+        legend.position = "bottom", legend.title = element_blank())
+
+# true level at every scan of one simulation, with the subject's prog_type (progressor type)
+true_long <- function(sim) {
+  L <- dat_long(within(sim$dat, y_mat <- sim$latent$A_mat)); names(L)[4] <- "A"
+  L$prog_type <- ifelse(sim$latent$Z[L$id] == 1, "accumulator", "non-accumulator")
+  L
+}
+
+# one row per subject: the design, and the mean level and OLS slope of the scans
+subj_summary <- function(dat, src) {
+  L <- dat_long(dat)
+  data.frame(src = src, base_age = dat$age_mat[, 1], n_obs = dat$n_obs,
+             fu = as.numeric(tapply(L$age, L$id, function(a) max(a) - min(a))),
+             lev = as.numeric(tapply(L$y, L$id, mean)),
+             slope = as.numeric(by(L, L$id, function(d) coef(lm(y ~ age, d))[2])))
+}
+
+# trajectories against age: one colour, or by prog_type when `colour` is NULL
+spaghetti <- function(L, y, title, sub = NULL, colour = NULL, S = SETTINGS) {
+  p <- ggplot(L, aes(age, .data[[y]], group = id)) +
+    geom_hline(yintercept = S$thresh, linetype = 2, linewidth = 0.3) +
+    coord_cartesian(xlim = c(50, 100), ylim = c(0.35, 1.65)) +
+    labs(title = title, subtitle = sub, x = "age", y = if (y == "A") "true SUVR" else "SUVR") +
+    sim_theme()
+  if (!is.null(colour)) return(p + geom_line(alpha = 0.25, linewidth = 0.25, colour = colour))
+  p + geom_line(aes(colour = prog_type), alpha = 0.3, linewidth = 0.25) +
+    scale_colour_manual(values = c(accumulator = "#B03030", "non-accumulator" = "#2C6FA8")) +
+    guides(colour = guide_legend(override.aes = list(alpha = 1, linewidth = 0.8)))
+}
+
+# Page 1: simulated SCANS vs real scans, side by side.
+plot_sim_check <- function(sim, real_path = "data/adni_amyloid.rds", S = SETTINGS) {
   suppressPackageStartupMessages({library(ggplot2); library(patchwork)})
-  thm <- theme_minimal(base_size = 8.5) +
-    theme(plot.title = element_text(face = "bold", size = 9), legend.position = "bottom")
   cols <- c(real = "grey35", simulated = "#B03030")
   real <- readRDS(real_path)
   Ls <- dat_long(sim$dat); Lr <- dat_long(real)
   both <- rbind(cbind(Lr, src = "real"), cbind(Ls, src = "simulated"))
-  per_subj <- function(dat, src) {
-    L <- dat_long(dat)
-    data.frame(src = src, base_age = dat$age_mat[, 1], n_obs = dat$n_obs,
-               fu = as.numeric(tapply(L$age, L$id, function(a) max(a) - min(a))),
-               slope = as.numeric(by(L, L$id, function(d) coef(lm(y ~ age, d))[2])))
-  }
-  subj <- rbind(per_subj(real, "real"), per_subj(sim$dat, "simulated"))
+  subj <- rbind(subj_summary(real, "real"), subj_summary(sim$dat, "simulated"))
 
-  spag <- function(L, col, title)
-    ggplot(L, aes(age, y, group = id)) + geom_line(alpha = 0.25, linewidth = 0.25, colour = col) +
-    geom_hline(yintercept = S$thresh, linetype = 2, linewidth = 0.3) +
-    coord_cartesian(xlim = c(50, 100), ylim = c(0.35, 1.65)) +
-    labs(title = title, x = "age", y = "SUVR") + thm
   dens <- function(D, v, xlab, title)
     ggplot(D, aes(.data[[v]], colour = src, fill = src)) + geom_density(alpha = 0.15, linewidth = 0.4) +
-    scale_colour_manual(values = cols, name = NULL) + scale_fill_manual(values = cols, name = NULL) +
-    labs(title = title, x = xlab, y = "density") + thm
-
-  # latent truth: A_ij coloured by branch
-  La <- dat_long(within(sim$dat, y_mat <- sim$latent$A_mat))
-  La$branch <- ifelse(sim$latent$Z[La$id] == 1, "accumulator", "non-accumulator")
-  p_lat <- ggplot(La, aes(age, y, group = id, colour = branch)) +
-    geom_line(alpha = 0.3, linewidth = 0.25) +
-    geom_hline(yintercept = S$thresh, linetype = 2, linewidth = 0.3) +
-    scale_colour_manual(values = c(accumulator = "#B03030", "non-accumulator" = "#2C6FA8"), name = NULL) +
-    coord_cartesian(xlim = c(50, 100), ylim = c(0.35, 1.65)) +
-    labs(title = "simulated TRUE levels A_ij, by branch", x = "age", y = "SUVR") + thm
-
+    scale_colour_manual(values = cols) + scale_fill_manual(values = cols) +
+    labs(title = title, x = xlab, y = "density") + sim_theme()
   p_nobs <- ggplot(subj, aes(factor(n_obs), fill = src)) + geom_bar(position = "dodge") +
-    scale_fill_manual(values = cols, name = NULL) +
-    labs(title = "scans per subject", x = "n_obs", y = "subjects") + thm
+    scale_fill_manual(values = cols) +
+    labs(title = "scans per subject", x = "n_obs", y = "subjects") + sim_theme()
 
   cu <- truth_curves(sim$truth)
   p_rate <- ggplot(data.frame(y = cu$bA$y, r = cu$r), aes(y, r)) + geom_line(linewidth = 0.4) +
     geom_vline(xintercept = c(sim$truth$mu_b, S$thresh), linetype = 2, linewidth = 0.3) +
-    labs(title = "true rate curve r_A(y)", x = "SUVR (dashed: mu_b, thresh)", y = "SUVR / year") + thm
+    labs(title = "true rate curve r_A(y)", x = "SUVR (dashed: mu_b, thresh)", y = "SUVR / year") + sim_theme()
   p_om <- ggplot(data.frame(y = cu$vA$y, om = cu$omega), aes(y, om)) + geom_line(linewidth = 0.4) +
-    labs(title = "true measurement scale omega_A(y)", x = "SUVR", y = "omega") + thm
+    labs(title = "true measurement scale omega_A(y)", x = "SUVR", y = "omega") + sim_theme()
 
-  fig <- (spag(Lr, cols[["real"]], sprintf("real: %d subjects, %d scans", real$n_subj, nrow(Lr))) |
-            spag(Ls, cols[["simulated"]], sprintf("simulated: %d subjects, %d scans", sim$dat$n_subj, nrow(Ls))) |
-            p_lat) /
-    (dens(both, "y", "SUVR", "all scans") | dens(subj, "base_age", "age", "baseline age") |
-       dens(subj, "fu", "years", "follow-up length")) /
-    (p_nobs | dens(subj[abs(subj$slope) < 0.1, ], "slope", "SUVR / year", "per-subject OLS slope") |
-       p_rate | p_om)
-  dir.create(dirname(file), showWarnings = FALSE, recursive = TRUE)
-  ggsave(file, fig, width = 11, height = 9.5)
-  invisible(fig)
+  # the per-subject OLS slope at each level, straight from the scans
+  subj$bin <- cut(subj$lev, seq(0.4, 1.6, by = 0.1))
+  SB <- do.call(rbind, lapply(split(subj, list(subj$src, subj$bin), drop = TRUE), function(d) if (nrow(d) >= 10)
+    data.frame(src = d$src[1], lev = mean(d$lev), mid = median(d$slope),
+               lo = quantile(d$slope, .25), hi = quantile(d$slope, .75))))
+  p_slope <- ggplot(SB, aes(lev, mid, colour = src, fill = src)) +
+    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.15, colour = NA) + geom_line(linewidth = 0.4) + geom_point(size = 0.8) +
+    scale_colour_manual(values = cols) + scale_fill_manual(values = cols) +
+    labs(title = "per-subject OLS slope by level", subtitle = "Median and IQR by subject mean SUVR.",
+         x = "subject mean SUVR", y = "SUVR / year") + sim_theme()
+
+  fig <- (spaghetti(Lr, "y", sprintf("real: %d subjects, %d scans", real$n_subj, nrow(Lr)), colour = cols[["real"]]) |
+            spaghetti(Ls, "y", sprintf("simulated: %d subjects, %d scans", sim$dat$n_subj, nrow(Ls)), colour = cols[["simulated"]]) |
+            dens(both, "y", "SUVR", "all scans")) /
+    (dens(subj, "base_age", "age", "baseline age") | dens(subj, "fu", "years", "follow-up length") | p_nobs) /
+    (p_slope | p_rate | p_om)
+  fig + plot_annotation(title = "Simulated scans against the real cohort")
 }
 
-# Simulated TRUTH vs what the fitted model says about the real cohort:
-# true SUVR, the shared curves, and the per-subject latent quantities.
+# Page 2: simulated TRUTH vs what the fitted model says about the real cohort:
+# true SUVR and the per-subject latent quantities.
 #
 # The real side has no observed truth, so it comes from the shipped posterior.
 # Per-subject quantities are compared WITHIN posterior draws (one thin grey line
@@ -462,20 +473,13 @@ plot_sim_check <- function(sim, real_path = "data/adni_amyloid.rds",
 # posterior medians: medians shrink the spread and would make a correct
 # simulation look too dispersed. Thin red lines are simulated replicates, so the
 # two bundles show posterior uncertainty against sampling variability.
-plot_truth_check <- function(sim, n_draw = 30, n_rep = 15,
-                             file = "simulated_data/figures/truth_check_baseline.pdf",
-                             S = SETTINGS, seed = 2) {
+plot_truth_check <- function(sim, n_draw = 30, n_rep = 15, S = SETTINGS, seed = 2) {
   suppressPackageStartupMessages({library(ggplot2); library(patchwork)})
   if (!exists("subject_quantities")) source("run_model.R")
-  thm <- theme_minimal(base_size = 8.5) +
-    theme(plot.title = element_text(face = "bold", size = 9),
-          plot.subtitle = element_text(size = 6.8, colour = "grey30"),
-          legend.position = "bottom", legend.title = element_blank())
   cols <- c("real (fitted)" = "grey35", simulated = "#B03030")
-  bcol <- c(accumulator = "#B03030", "non-accumulator" = "#2C6FA8")
-  truth <- sim$truth; cu <- truth_curves(truth); bA <- cu$bA; vA <- cu$vA
+  truth <- sim$truth; bA <- make_rate_basis()
 
-  # ---- real side: per-draw latent quantities from the shipped posterior
+  # ---- real side: per-draw latent quantities from the fitted posterior
   fit <- load_fitted_model(); real <- fit$dat; n <- real$n_subj
   sq  <- subject_quantities(fit, n_draw = n_draw, seed = seed)
   pp  <- pool_paired(fit)
@@ -483,22 +487,16 @@ plot_truth_check <- function(sim, n_draw = 30, n_rep = 15,
   stopifnot("draws must line up with subject_quantities" = isTRUE(all.equal(pp$g[d, ], sq$g)))
   K  <- length(d)
   BB <- t(pp$u[d, sprintf("b[%d]", 1:n), drop = FALSE])            # n x K, like sq$alpha
-  XT <- t(pp$u[d, sprintf("x_tilde[%d]", 1:n), drop = FALSE])
-  ZZ <- matrix(rbinom(n * K, 1, sq$p_susc), n, K)                   # membership, per draw
+  type <- matrix(rbinom(n * K, 1, sq$p_susc), n, K) == 1            # TRUE = accumulator, per draw
 
   # true level at every scan for posterior draw k
-  real_levels <- function(k) {
-    r <- rate_grid(fit$bA, sq$g[k, sprintf("theta[%d]", 1:fit$bA$K)])
-    G <- clock_grid(fit$bA, r, S$thresh); Gb <- sa_interp(fit$bA$y, G, sq$g[k, "mu_b"])
+  real_long <- function(k) {
+    r <- rate_grid(bA, sq$g[k, sprintf("theta[%d]", 1:bA$K)])
+    G <- clock_grid(bA, r, S$thresh); Gb <- sa_interp(bA$y, G, sq$g[k, "mu_b"])
     L <- dat_long(real)
     g <- pmin(pmax(Gb + exp(sq$delta[L$id, k]) * (L$age - sq$alpha[L$id, k]), Gb), max(G))
-    L$A <- ifelse(ZZ[L$id, k] == 1, sa_inv_monotone(fit$bA$y, G, g), BB[L$id, k])
-    L$branch <- ifelse(ZZ[L$id, k] == 1, "accumulator", "non-accumulator")
-    L
-  }
-  sim_levels <- function(s) {
-    L <- dat_long(within(s$dat, y_mat <- s$latent$A_mat)); names(L)[4] <- "A"
-    L$branch <- ifelse(s$latent$Z[L$id] == 1, "accumulator", "non-accumulator")
+    L$A <- ifelse(type[L$id, k], sa_inv_monotone(bA$y, G, g), BB[L$id, k])
+    L$prog_type <- ifelse(type[L$id, k], "accumulator", "non-accumulator")
     L
   }
 
@@ -506,113 +504,60 @@ plot_truth_check <- function(sim, n_draw = 30, n_rep = 15,
   sims <- c(list(sim), lapply(seq_len(n_rep - 1L), function(r)
     simulate_one(truth, seed = sim$seed + 7919L * r, verbose = FALSE)))
 
-  # long table of one latent quantity: one row per subject per draw / replicate
-  lat <- function(name, real_mat, real_keep, sim_get) rbind(
-    do.call(rbind, lapply(seq_len(K), function(k)
-      data.frame(q = name, src = "real (fitted)", rep = k, v = real_mat[real_keep[, k], k]))),
-    do.call(rbind, lapply(seq_along(sims), function(r)
-      data.frame(q = name, src = "simulated", rep = r, v = sim_get(sims[[r]])))))
-  acc <- ZZ == 1
-  D <- rbind(
-    lat("onset age alpha (accumulators)", sq$alpha, acc, function(s) s$latent$alpha[s$latent$Z == 1]),
-    lat("speed delta (accumulators)", sq$delta, acc, function(s) s$latent$delta[s$latent$Z == 1]),
-    lat("x_tilde: level at centroid (accumulators)", XT, acc, function(s) s$latent$x_tilde[s$latent$Z == 1]),
-    lat("level b (non-accumulators)", BB, !acc, function(s) s$latent$b[s$latent$Z == 0]))
-  LV <- rbind(
-    do.call(rbind, lapply(seq_len(K), function(k) data.frame(src = "real (fitted)", rep = k, v = real_levels(k)$A))),
-    do.call(rbind, lapply(seq_along(sims), function(r) data.frame(src = "simulated", rep = r, v = sim_levels(sims[[r]])$A))))
+  # long table of one quantity: one row per value per posterior draw / replicate
+  versus <- function(real_get, sim_get) rbind(
+    do.call(rbind, lapply(seq_len(K), function(k) data.frame(src = "real (fitted)", rep = k, v = real_get(k)))),
+    do.call(rbind, lapply(seq_along(sims), function(r) data.frame(src = "simulated", rep = r, v = sim_get(sims[[r]])))))
+  of_acc <- function(nm) function(s) s$latent[[nm]][s$latent$Z == 1]
+  D <- list(
+    "onset age alpha (accumulators)" = versus(function(k) sq$alpha[type[, k], k], of_acc("alpha")),
+    "speed delta (accumulators)" = versus(function(k) sq$delta[type[, k], k], of_acc("delta")),
+    "level b (non-accumulators)" = versus(function(k) BB[!type[, k], k], function(s) s$latent$b[s$latent$Z == 0]))
+  LV <- versus(function(k) real_long(k)$A, function(s) true_long(s)$A)
 
   bundle <- function(DD, title, xlab, sub = NULL)
     ggplot(DD, aes(v, colour = src, group = interaction(src, rep))) +
     geom_line(stat = "density", alpha = 0.35, linewidth = 0.3) +
     scale_colour_manual(values = cols) +
     guides(colour = guide_legend(override.aes = list(alpha = 1, linewidth = 0.8))) +
-    labs(title = title, subtitle = sub, x = xlab, y = "density") + thm
+    labs(title = title, subtitle = sub, x = xlab, y = "density") + sim_theme()
 
   # ---- row 1: true SUVR
-  spag <- function(L, title, sub)
-    ggplot(L, aes(age, A, group = id, colour = branch)) + geom_line(alpha = 0.3, linewidth = 0.25) +
-    geom_hline(yintercept = S$thresh, linetype = 2, linewidth = 0.3) +
-    scale_colour_manual(values = bcol) +
-    guides(colour = guide_legend(override.aes = list(alpha = 1, linewidth = 0.8))) +
-    coord_cartesian(xlim = c(50, 100), ylim = c(0.35, 1.65)) +
-    labs(title = title, subtitle = sub, x = "age", y = "true SUVR") + thm
-  p_real <- spag(real_levels(1), "A. Real cohort: fitted true SUVR", "One posterior draw; membership sampled.")
-  p_sim  <- spag(sim_levels(sim), "B. Simulated: true SUVR A_ij", "This dataset.")
+  p_real <- spaghetti(real_long(1), "A", "A. Real cohort: fitted true SUVR", "One posterior draw; membership sampled.")
+  p_sim  <- spaghetti(true_long(sim), "A", "B. Simulated: true SUVR A_ij", "This dataset.")
   p_lev  <- bundle(LV, "C. True SUVR at every scan", "true SUVR",
                    sprintf("%d posterior draws vs %d simulated replicates.", K, n_rep))
 
-  # ---- row 2: the shared curves. Band = posterior, line = the simulated truth
-  band <- function(M, x) { q <- apply(M, 1, quantile, c(.025, .5, .975), na.rm = TRUE)
-    data.frame(x = x, lo = q[1, ], mid = q[2, ], hi = q[3, ]) }
-  curve_panel <- function(bd, tr, title, sub, xlab, ylab)
-    ggplot(bd, aes(x, mid)) +
-    geom_ribbon(aes(ymin = lo, ymax = hi), fill = "grey35", alpha = 0.2) +
-    geom_line(aes(colour = "real (fitted)"), linewidth = 0.4) +
-    geom_line(data = tr, aes(x, y, colour = "simulated"), linewidth = 0.5) +
-    scale_colour_manual(values = cols) +
-    labs(title = title, subtitle = sub, x = xlab, y = ylab) + thm
-  Rg <- sapply(seq_len(K), function(k) rate_grid(bA, sq$g[k, sprintf("theta[%d]", 1:bA$K)]))
-  qd <- quantile(dat_long(real)$y, c(.02, .98))
-  p_rate <- curve_panel(band(Rg, bA$y), data.frame(x = bA$y, y = cu$r), "D. Rate curve r_A(y)",
-                        "Band: posterior 95%. Grey: outside the real data.", "SUVR", "SUVR / year") +
-    annotate("rect", xmin = -Inf, xmax = qd[1], ymin = -Inf, ymax = Inf, fill = "grey60", alpha = 0.15) +
-    annotate("rect", xmin = qd[2], xmax = Inf, ymin = -Inf, ymax = Inf, fill = "grey60", alpha = 0.15)
-  tt <- seq(0, 60, by = 0.5)
-  path <- function(G, mb) sa_inv_monotone(bA$y, G, pmin(sa_interp(bA$y, G, mb) + tt, max(G)))
-  Pg <- sapply(seq_len(K), function(k) path(clock_grid(bA, Rg[, k], S$thresh), sq$g[k, "mu_b"]))
-  p_path <- curve_panel(band(Pg, tt), data.frame(x = tt, y = path(cu$G, truth$mu_b)),
-                        "E. Shared trajectory from the floor", "Level against years since onset, at unit speed.",
-                        "years since onset", "true SUVR") +
-    geom_hline(yintercept = S$thresh, linetype = 2, linewidth = 0.3)
-  Og <- sapply(seq_len(K), function(k) as.numeric(exp(fit$vA$B %*% sq$g[k, sprintf("nu[%d]", 1:fit$vA$K)])))
-  p_om <- curve_panel(band(Og, fit$vA$y), data.frame(x = vA$y, y = cu$omega),
-                      "F. Measurement scale omega_A(y)", "Band: posterior 95%.", "SUVR", "omega")
-  # model-free: the per-subject OLS slope at each level, straight from the scans
-  slopes <- function(dat, src) {
-    L <- dat_long(dat)
-    data.frame(src = src, lev = as.numeric(tapply(L$y, L$id, mean)),
-               sl = as.numeric(by(L, L$id, function(d) coef(lm(y ~ age, d))[2])))
-  }
-  SL <- rbind(slopes(real, "real (fitted)"), do.call(rbind, lapply(sims, function(s) slopes(s$dat, "simulated"))))
-  SL$bin <- cut(SL$lev, seq(0.4, 1.6, by = 0.1))
-  SB <- do.call(rbind, lapply(split(SL, list(SL$src, SL$bin), drop = TRUE), function(d) if (nrow(d) >= 10)
-    data.frame(src = d$src[1], lev = mean(d$lev), mid = median(d$sl),
-               lo = quantile(d$sl, .25), hi = quantile(d$sl, .75))))
-  SB$src <- ifelse(SB$src == "simulated", "simulated", "real (observed)")
-  p_slope <- ggplot(SB, aes(lev, mid, colour = src, fill = src)) +
-    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.15, colour = NA) + geom_line(linewidth = 0.4) + geom_point(size = 0.8) +
-    scale_colour_manual(values = c("real (observed)" = "grey35", simulated = "#B03030")) +
-    scale_fill_manual(values = c("real (observed)" = "grey35", simulated = "#B03030")) +
-    labs(title = "G. Observed slope by level (model-free)", subtitle = "Per-subject OLS slope: median and IQR by mean SUVR.",
-         x = "subject mean SUVR", y = "SUVR / year") + thm
-
-  # ---- row 3: latent quantities
-  shr <- rbind(data.frame(src = "real (fitted)", v = colMeans(ZZ)),
+  # ---- row 2: latent quantities
+  shr <- rbind(data.frame(src = "real (fitted)", v = colMeans(type)),
                data.frame(src = "simulated", v = sapply(sims, function(s) mean(s$latent$Z))))
   p_shr <- ggplot(shr, aes(src, v, colour = src)) + geom_jitter(width = 0.15, height = 0, size = 0.8, alpha = 0.7) +
     scale_colour_manual(values = cols) + guides(colour = "none") +
-    labs(title = "H. Share of accumulators", subtitle = "One point per draw / replicate.", x = NULL, y = "share") + thm
-  qs <- unique(D$q)
-  p_lat <- Map(function(q, lab, xl) bundle(D[D$q == q, ], lab, xl), qs,
-               c("I. Onset age alpha", "J. Speed delta", "K. Level at centroid x_tilde", "L. Non-accumulator level b"),
-               c("age (accumulators)", "log speed (accumulators)", "SUVR (accumulators)", "SUVR (non-accumulators)"))
+    labs(title = "D. Share of accumulators", subtitle = "One point per draw / replicate.", x = NULL, y = "share") + sim_theme()
+  p_lat <- Map(bundle, D, c("E. Onset age alpha", "F. Speed delta", "G. Non-accumulator level b"),
+               c("age (accumulators)", "log speed (accumulators)", "SUVR (non-accumulators)"))
 
-  fig <- (p_real | p_sim | p_lev) / (p_rate | p_path | p_om | p_slope) /
-    (p_shr | p_lat[[1]] | p_lat[[2]] | p_lat[[3]] | p_lat[[4]]) + plot_layout(heights = c(1.25, 1, 1))
-  dir.create(dirname(file), showWarnings = FALSE, recursive = TRUE)
-  ggsave(file, fig, width = 14, height = 11)
+  fig <- (p_real | p_sim | p_lev) / (p_shr | p_lat[[1]] | p_lat[[2]] | p_lat[[3]]) +
+    plot_annotation(title = "Simulated truth against the fit to the real cohort")
 
   # ---- the same comparison in numbers: mean over draws / replicates of each summary
   summ <- function(v) c(mean = mean(v), sd = sd(v), q05 = unname(quantile(v, .05)), q95 = unname(quantile(v, .95)))
-  tab <- do.call(rbind, lapply(split(D, list(D$q, D$src)), function(d)
-    data.frame(quantity = d$q[1], src = d$src[1],
-               t(rowMeans(sapply(split(d$v, d$rep), summ))))))
+  tab <- do.call(rbind, lapply(names(D), function(q) do.call(rbind, lapply(split(D[[q]], D[[q]]$src), function(d)
+    data.frame(quantity = q, src = d$src[1], t(rowMeans(sapply(split(d$v, d$rep), summ))))))))
   tab <- rbind(tab, data.frame(quantity = "share of accumulators", src = c("real (fitted)", "simulated"),
                                mean = tapply(shr$v, shr$src, mean), sd = tapply(shr$v, shr$src, sd), q05 = NA, q95 = NA))
-  tab <- tab[order(tab$quantity, tab$src), ]; rownames(tab) <- NULL
+  rownames(tab) <- NULL
   print(format(tab, digits = 3), row.names = FALSE)
   invisible(list(fig = fig, table = tab))
+}
+
+# Both check pages in ONE pdf. Look at this BEFORE fitting anything.
+plot_checks <- function(sim, file = "simulated_data/figures/sim_check_baseline.pdf") {
+  p1 <- plot_sim_check(sim); p2 <- plot_truth_check(sim)
+  dir.create(dirname(file), showWarnings = FALSE, recursive = TRUE)
+  pdf(file, width = 14, height = 9.5); print(p1); print(p2$fig); dev.off()
+  cat(sprintf("wrote %s\n", file))
+  invisible(p2$table)
 }
 
 #########################################
@@ -657,17 +602,12 @@ simulate_all <- function(n_rep = 1L, which = NULL, seed0 = 1000L,
 # $dat is the simulated counterpart of load_amyloid_data().
 load_simulated <- function(scenario = "baseline", rep = 1L, out_dir = "simulated_data/datasets")
   readRDS(file.path(out_dir, sprintf("sim_%s_rep%02d.rds", scenario, rep)))
-load_simulated_data <- function(...) load_simulated(...)$dat
 
 if (sys.nframe() == 0L) {
-  # FIRST: one baseline dataset, checked and plotted against the real data
+  # FIRST: one baseline dataset, checked, and plotted against the real cohort
+  # (its scans against the real scans, its truth against the real-data fit)
   cat("baseline check dataset\n")
-  sim <- simulate_one(get_baseline_truth(), seed = 1L)
-  plot_sim_check(sim)
-  cat("-> simulated_data/figures/sim_check_baseline.pdf\n")
-  # its TRUTH against the fitted real cohort: true SUVR, curves, latent quantities
-  plot_truth_check(sim)
-  cat("-> simulated_data/figures/truth_check_baseline.pdf\n")
+  plot_checks(simulate_one(get_baseline_truth(), seed = 1L))
   # THEN: every scenario
   simulate_all(n_rep = 1L)
 }

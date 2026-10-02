@@ -6,12 +6,14 @@
 ##      fit <- fit_simulated_model(rep = 1, tier = "smoke")    # ~1 min, a check
 ##      run_simulation_study(n_sim = 5, tier = "infer")        # ~1.5 h, 5 fits in parallel
 ##      recovery_summary()                                     # the coverage / MSE table
+##      plot_sim_fits()                                        # the fitted figures
 ##
 ##  or, for the whole study in one go:
 ##
 ##      Rscript simulated_data/fit_simulated_data.R [tier] [n_sim]
 ##
-##  Everything is written to simulated_data/results/.
+##  Fits and tables are written to simulated_data/results/, figures to
+##  simulated_data/figures/.
 ## =====================================================================
 
 for (f in sort(list.files("R", full.names = TRUE))) source(f)
@@ -181,10 +183,13 @@ fit_simulated_model <- function(scenario = "baseline", rep = 1L,
   ## own, so redoing only the unfinished ones gives the same fit.
   chains <- vector("list", n_chains); subj <- vector("list", n_chains)
   partial <- file.path(out_dir, sprintf("%s_partial.rds", tag))
-  if (file.exists(partial)) { old <- readRDS(partial)
+  if (file.exists(partial)) {
+    old <- readRDS(partial)
     for (ch in seq_len(min(n_chains, length(old$chains))))
-      if (!is.null(old$chains[[ch]]) && nrow(old$chains[[ch]]) == cfg$n_iter) {
-        chains[[ch]] <- old$chains[[ch]]; subj[[ch]] <- old$subj[[ch]] } }
+      if (NROW(old$chains[[ch]]) == cfg$n_iter) {
+        chains[[ch]] <- old$chains[[ch]]; subj[[ch]] <- old$subj[[ch]]
+      }
+  }
   for (ch in seq_len(n_chains)) {
     if (!is.null(chains[[ch]])) { say("  chain %d: kept from the interrupted run\n", ch); next }
     set.seed(seed + ch)
@@ -217,9 +222,10 @@ fit_simulated_model <- function(scenario = "baseline", rep = 1L,
   fit <- list(tier = tier, scenario = scenario, rep = rep, chains = chains, subj = subj,
               dat = dat, truth = sim$truth, latent = latent, data_seed = sim$seed,
               bA = bA, vA = vA, settings = SETTINGS, minutes = el())
-  saveRDS(fit, file.path(out_dir, sprintf("%s_fit.rds", tag)))
+  fit_file <- file.path(out_dir, sprintf("%s_fit.rds", tag))
+  saveRDS(fit, fit_file)
   unlink(partial)
-  say("done in %.1f min -> %s\n", el(), file.path(out_dir, sprintf("%s_fit.rds", tag)))
+  say("done in %.1f min -> %s\n", el(), fit_file)
   invisible(fit)
 }
 
@@ -241,7 +247,8 @@ recovery_one <- function(fit, burn_frac = 1/3) {
              setNames(tr$nu, sprintf("nu[%d]", 1:8)))
   group <- c(rep("Susceptibility", 3), rep("Departure age", 4), rep("Speed", 3),
              rep("Floor", 2), rep("Curves", 17))
-  L <- lapply(fit$chains, function(m) m[(floor(nrow(m) * burn_frac) + 1):nrow(m), names(truth), drop = FALSE])
+  burn <- function(m) m[(floor(nrow(m) * burn_frac) + 1):nrow(m), , drop = FALSE]
+  L <- lapply(fit$chains, function(m) burn(m)[, names(truth), drop = FALSE])
   s <- do.call(rbind, L); n <- nrow(L[[1]])
   q <- apply(s, 2, quantile, c(.025, .5, .975))
   ## same split-free R-hat as convergence()
@@ -254,7 +261,7 @@ recovery_one <- function(fit, burn_frac = 1/3) {
   
   ## z_i: one per subject, so its row is the AVERAGE over subjects -- `covered`
   ## is the share of subjects whose interval contains their true z_i.
-  U  <- do.call(rbind, lapply(fit$subj, function(m) m[(floor(nrow(m) * burn_frac) + 1):nrow(m), , drop = FALSE]))
+  U  <- do.call(rbind, lapply(fit$subj, burn))
   zq <- apply(U[, sprintf("z[%d]", seq_len(fit$dat$n_subj)), drop = FALSE], 2, quantile, c(.025, .5, .975))
   zt <- fit$latent$z
   out <- rbind(out, data.frame(scenario = fit$scenario, rep = fit$rep, group = "Speed",
@@ -272,10 +279,15 @@ recovery_one <- function(fit, burn_frac = 1/3) {
 ##  mse       : average of (posterior median - truth)^2;  rmse = sqrt(mse)
 ##  max_rhat  : worst R-hat over the fits. An interval from a chain that has
 ##              not converged is not a 95% interval, so read coverage with it.
-recovery_summary <- function(scenario = "baseline", tier = "infer",
-                             out_dir = "simulated_data/results", write = TRUE) {
+fit_files <- function(scenario, tier, out_dir) {
   files <- list.files(out_dir, sprintf("^%s_%s_rep[0-9]+_fit\\.rds$", tier, scenario), full.names = TRUE)
   if (!length(files)) stop("no fits found for ", tier, " / ", scenario, " in ", out_dir)
+  files
+}
+
+recovery_summary <- function(scenario = "baseline", tier = "infer",
+                             out_dir = "simulated_data/results", write = TRUE) {
+  files <- fit_files(scenario, tier, out_dir)
   by_sim <- do.call(rbind, lapply(files, function(f) recovery_one(readRDS(f))))
   by_sim$parameter <- factor(by_sim$parameter, unique(by_sim$parameter))
   tab <- do.call(rbind, lapply(split(by_sim, by_sim$parameter), function(d) {
@@ -297,6 +309,65 @@ recovery_summary <- function(scenario = "baseline", tier = "infer",
               100 * sum(tab$n_covered[sc]) / sum(tab$n_sim[sc])))
   print(format(tab, digits = 3), row.names = FALSE)
   invisible(list(summary = tab, by_sim = by_sim))
+}
+
+## ---- the fitted figures ----------------------------------------------
+##  The report figures, drawn from the fits to SIMULATED data, in ONE pdf:
+##   * page 1: the rate curve across replicates, where the simulation adds
+##     what the real cohort cannot: the TRUE curve, drawn over each band;
+##   * then two pages per replicate: fig_aligned() and fig_fit_check() exactly
+##     as for the real cohort (R/05_figures.R), so the two can be read side
+##     by side.
+##  The pages keep their own sizes, so they are drawn separately and joined
+##  with qpdf.
+plot_sim_fits <- function(scenario = "baseline", tier = "infer", n_draw = 60,
+                          out_dir = "simulated_data/results", fig_dir = "simulated_data/figures") {
+  if (!requireNamespace("qpdf", quietly = TRUE)) stop("install.packages(\"qpdf\") to join the pages")
+  dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
+  tmp <- tempfile("simfit_"); dir.create(tmp)
+  pages <- file.path(tmp, "rate_curves.pdf")
+  bands <- list()
+  for (f in fit_files(scenario, tier, out_dir)) {
+    fit <- readRDS(f); rp <- sprintf("rep%02d", fit$rep)
+    cat(sprintf("\n%s: %d of %d subjects are true accumulators\n", rp, sum(fit$latent$Z), fit$dat$n_subj))
+    sq <- subject_quantities(fit, n_draw = n_draw)
+    ttl <- sprintf("%s, replicate %d", scenario, fit$rep)
+    pg  <- file.path(tmp, sprintf("%s_%s.pdf", rp, c("aligned", "fit_check")))
+    fig_aligned(fit, sq, pg[1], title = ttl)
+    fig_fit_check(fit, sq, pg[2], title = ttl)
+    pages <- c(pages, pg)
+    R  <- exp(fit$bA$B %*% t(pool_draws(fit)[, sprintf("theta[%d]", 1:fit$bA$K)]))
+    qd <- quantile(dat_long(fit$dat)$y, c(.02, .98))
+    bands[[rp]] <- cbind(.band(R, fit$bA$y), rep = rp, in_data = fit$bA$y >= qd[1] & fit$bA$y <= qd[2])
+  }
+  B  <- do.call(rbind, bands)
+  cu <- truth_curves(fit$truth)
+  tr <- data.frame(x = cu$bA$y, y = cu$r)
+  rate_panel <- function(p, title, sub)
+    p + geom_line(data = tr, aes(x, y, colour = "truth"), inherit.aes = FALSE, linewidth = 0.5) +
+    geom_vline(xintercept = to_centiloid(fit$truth$mu_b), linetype = "dashed", colour = "grey40", linewidth = 0.3) +
+    geom_vline(xintercept = to_centiloid(SETTINGS$thresh), linetype = "dotted", linewidth = 0.3) +
+    scale_colour_manual(values = c("posterior median" = "grey15", truth = "#B03030")) +
+    coord_cartesian(ylim = c(0, 0.05)) +
+    labs(title = title, subtitle = sub, x = "amyloid level y (Centiloid)", y = "SUVR per year") +
+    .thm() + theme(legend.position = "bottom")
+  B$x <- to_centiloid(B$x); tr$x <- to_centiloid(tr$x)
+  p_all <- rate_panel(ggplot(B, aes(x, mid, group = rep)) +
+                        geom_line(aes(colour = "posterior median"), linewidth = 0.3, alpha = 0.7),
+                      "A. Rate curve r(y): all replicates",
+                      "One posterior median per simulated dataset, against the truth.\nDashed = the true floor mu_b; dotted = threshold.")
+  p_rep <- rate_panel(ggplot(B, aes(x, mid)) +
+                        geom_ribbon(aes(ymin = lo, ymax = hi), fill = "grey25", alpha = 0.2) +
+                        geom_ribbon(data = B[!B$in_data & B$x < 0, ], aes(ymin = -Inf, ymax = Inf), fill = "grey60", alpha = 0.2) +
+                        geom_ribbon(data = B[!B$in_data & B$x > 0, ], aes(ymin = -Inf, ymax = Inf), fill = "grey60", alpha = 0.2) +
+                        geom_line(aes(colour = "posterior median"), linewidth = 0.4) + facet_wrap(~rep, nrow = 1),
+                      "B. Each replicate, with its 95% band",
+                      "Grey = outside the range of that dataset, where the curve is prior-driven.")
+  pdf(pages[1], width = 15, height = 4.3); print(p_all + p_rep + plot_layout(widths = c(1, 3.6))); dev.off()
+  out <- file.path(fig_dir, sprintf("fit_%s_%s.pdf", tier, scenario))
+  qpdf::pdf_combine(pages, out)
+  cat(sprintf("\nwrote %s (%d pages)\n", out, length(pages)))
+  invisible(B)
 }
 
 ## ---- the study -------------------------------------------------------
@@ -373,6 +444,7 @@ convergence <- function(fit, burn_frac = 1/3, n_show = 8) {
 
 if (sys.nframe() == 0L) {
   args <- commandArgs(trailingOnly = TRUE)
-  run_simulation_study(n_sim = if (length(args) >= 2) as.integer(args[2]) else 5L,
-                       tier  = if (length(args) >= 1) args[1] else "infer")
+  tier <- if (length(args) >= 1) args[1] else "infer"
+  run_simulation_study(n_sim = if (length(args) >= 2) as.integer(args[2]) else 5L, tier = tier)
+  plot_sim_fits(tier = tier)
 }

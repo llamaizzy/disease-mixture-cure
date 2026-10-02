@@ -9,8 +9,7 @@
 ##  under the actual NIMBLE model -- i.e. the data were generated from the
 ##  model that will be fitted to them, not from something merely similar.
 ## =====================================================================
-source("run_model.R")
-source("simulated_data/simulate_data.R")
+source("simulated_data/fit_simulated_data.R")       # sources R/ and the simulator
 ok <- 0L; fail <- character()
 chk <- function(name, expr) {
   v <- tryCatch(isTRUE(expr), error = function(e) FALSE)
@@ -35,7 +34,7 @@ chk("an out-of-support truth is refused",
              "try-error"))
 
 cat("\n2. one dataset\n")
-real <- load_amyloid_data()
+real <- readRDS("data/adni_amyloid.rds")
 sim  <- simulate_one(truth, seed = 1L, verbose = FALSE)
 chk("same seed, same dataset", identical(sim$dat, simulate_one(truth, seed = 1L, verbose = FALSE)$dat))
 chk("different seed, different dataset",
@@ -59,10 +58,11 @@ chk("accumulators never go down, non-accumulators are flat",
       if (sim$latent$Z[i] == 1) all(d >= 0) else all(d == 0) })))
 
 cat("\n3. the fitted model accepts the simulated data\n")
-## logProb at the TRUTH, with the var basis the truth was written in
+## logProb at the inits the fit starts from, and at the TRUTH, with the var
+## basis the truth was written in
 lp_at_truth <- function(sim) {
   bA <- make_rate_basis(); vA <- true_var_basis()
-  spec <- build_model(sim$dat, bA, vA)
+  spec <- repair_inits(build_model(sim$dat, bA, vA), sim$dat, bA)
   m <- nimbleModel(spec$code, spec$constants, spec$data, spec$inits,
                    calculate = FALSE, check = FALSE)
   lp0 <- m$calculate()
@@ -77,13 +77,12 @@ chk("baseline: finite log-density at the inits", is.finite(lp[["inits"]]))
 chk("baseline: finite log-density at the truth", is.finite(lp[["truth"]]))
 chk("baseline: the truth beats the inits", lp[["truth"]] > lp[["inits"]])
 ## the scenario that pushes trajectories hardest against the top of the grid
-lp <- lp_at_truth(simulate_one(sc$speed_spread_hi, seed = 1L, verbose = FALSE))
+hi <- simulate_one(sc$speed_spread_hi, seed = 1L, verbose = FALSE)
+lp <- lp_at_truth(hi)
 cat(sprintf("        speed_spread_hi: logProb %.1f at the inits, %.1f at the truth\n", lp[1], lp[2]))
-## NOT a chk: build_model()'s inits can be infeasible for a subject sitting at
-## the top of the grid (levels the real cohort never reaches). The data are
-## valid -- the truth is finite -- but the fit will refuse to start as is.
-cat(sprintf("  NOTE  speed_spread_hi: log-density at the inits is %s\n",
-            if (is.finite(lp[["inits"]])) "finite" else "-Inf (inits, not data)"))
+## build_model()'s own inits are -Inf here (subjects at the top of the grid);
+## repair_inits() is what makes this scenario fittable
+chk("speed_spread_hi: finite log-density at the inits", is.finite(lp[["inits"]]))
 chk("speed_spread_hi: finite log-density at the truth", is.finite(lp[["truth"]]))
 
 cat(sprintf("\n%d passed, %d failed\n", ok, length(fail)))
