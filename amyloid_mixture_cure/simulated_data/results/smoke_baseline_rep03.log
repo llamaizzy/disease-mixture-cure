@@ -1,0 +1,13 @@
+baseline rep 3, tier smoke: 250 subjects, 738 scans, 3 chains x 300 iterations
+logProb at inits: 1210.86 (finite: TRUE; 0 x_tilde inits lowered)
+compiled (0.9 min)
+  chain 1 start logProb 1210.86
+  chain 1: 150/300  (1.0 min)
+  chain 1: 300/300  (1.1 min)
+  chain 2 start logProb 1173.78
+  chain 2: 150/300  (1.2 min)
+  chain 2: 300/300  (1.3 min)
+  chain 3 start logProb 1210.27
+  chain 3: 150/300  (1.4 min)
+  chain 3: 300/300  (1.5 min)
+done in 1.5 min -> simulated_data/results/smoke_baseline_rep03_fit.rds

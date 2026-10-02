@@ -1,0 +1,6 @@
+Warning messages:
+1: package 'splines2' was built under R version 4.4.1 
+2: package 'nimble' was built under R version 4.4.3 
+3: package 'ggplot2' was built under R version 4.4.3 
+4: package 'patchwork' was built under R version 4.4.1 
+baseline / infer: 5 replicates, 5 to fit on 5 cores (logs in simulated_data/results)

@@ -618,7 +618,6 @@ plot_truth_check <- function(sim, n_draw = 30, n_rep = 15,
 #########################################
 # 9. Generate one dataset
 #########################################
-# Check: plot this against the real data before run simulation
 simulate_one <- function(truth, N = NULL, seed, verbose = TRUE) {
   set.seed(seed)
   if (is.null(N)) N <- truth$N
@@ -636,22 +635,29 @@ simulate_one <- function(truth, N = NULL, seed, verbose = TRUE) {
 # Simulate
 #########################################
 # Generate different scenarios and replicates
-simulate_all <- function(n_rep = 1L, seed0 = 1000L, out_dir = "simulated_data/datasets") {
+#   which: scenario names to generate (default all). The seed depends only on the
+#   scenario and the replicate, so a dataset is the same whichever subset is run.
+simulate_all <- function(n_rep = 1L, which = NULL, seed0 = 1000L,
+                         out_dir = "simulated_data/datasets", verbose = TRUE) {
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
   scenarios <- make_scenarios(get_baseline_truth())
-  for (s in seq_along(scenarios)) for (rep in seq_len(n_rep)) {
+  if (is.null(which)) which <- names(scenarios)
+  stopifnot(all(which %in% names(scenarios)))
+  for (s in match(which, names(scenarios))) for (rep in seq_len(n_rep)) {
     nm <- names(scenarios)[s]
-    cat(sprintf("\n%s, replicate %d\n", nm, rep))
-    sim <- simulate_one(scenarios[[s]], seed = seed0 + 100L * s + rep)
+    if (verbose) cat(sprintf("\n%s, replicate %d\n", nm, rep))
+    sim <- simulate_one(scenarios[[s]], seed = seed0 + 100L * s + rep, verbose = verbose)
     sim$scenario <- nm; sim$rep <- rep
     saveRDS(sim, file.path(out_dir, sprintf("sim_%s_rep%02d.rds", nm, rep)))
   }
-  invisible(names(scenarios))
+  invisible(which)
 }
 
-# simulated counterpart of load_amyloid_data(): the dat list build_model() reads
-load_simulated_data <- function(scenario = "baseline", rep = 1L, out_dir = "simulated_data/datasets")
-  readRDS(file.path(out_dir, sprintf("sim_%s_rep%02d.rds", scenario, rep)))$dat
+# One saved simulation: list(dat, truth, latent, seed, scenario, rep).
+# $dat is the simulated counterpart of load_amyloid_data().
+load_simulated <- function(scenario = "baseline", rep = 1L, out_dir = "simulated_data/datasets")
+  readRDS(file.path(out_dir, sprintf("sim_%s_rep%02d.rds", scenario, rep)))
+load_simulated_data <- function(...) load_simulated(...)$dat
 
 if (sys.nframe() == 0L) {
   # FIRST: one baseline dataset, checked and plotted against the real data
