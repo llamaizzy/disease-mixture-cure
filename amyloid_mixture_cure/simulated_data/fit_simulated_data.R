@@ -10,7 +10,7 @@
 ##
 ##  or, for the whole study in one go:
 ##
-##      Rscript simulated_data/fit_simulated_data.R [tier] [n_sim]
+##      Rscript simulated_data/fit_simulated_data.R [tier] [n_sim] [scenario]
 ##
 ##  Fits and tables are written to simulated_data/results/, figures to
 ##  simulated_data/figures/.
@@ -444,7 +444,9 @@ convergence <- function(fit, burn_frac = 1/3, n_show = 8) {
 
 if (sys.nframe() == 0L) {
   args <- commandArgs(trailingOnly = TRUE)
-  tier <- if (length(args) >= 1) args[1] else "infer"
-  run_simulation_study(n_sim = if (length(args) >= 2) as.integer(args[2]) else 5L, tier = tier)
-  plot_sim_fits(tier = tier)
+  tier     <- if (length(args) >= 1) args[1] else "infer"
+  n_sim    <- if (length(args) >= 2) as.integer(args[2]) else 5L
+  scenario <- if (length(args) >= 3) args[3] else "baseline"
+  run_simulation_study(n_sim = n_sim, scenario = scenario, tier = tier)
+  plot_sim_fits(scenario = scenario, tier = tier)
 }
