@@ -8,13 +8,15 @@
 # -> save in rds files
 
 # Run from the package root:
-#     Rscript simulated_data/simulate_data.R     # check + plot ONE baseline dataset, then all scenarios
+#     Rscript simulated_data/simulate_data.R [data_id] [n_rep]   # check + plot ONE baseline dataset, then all scenarios
+#     simulate_all(n_rep = 20, data_id = "crn-v1")                # every scenario into simulated_data/data/crn-v1/
 #     source("simulated_data/simulate_data.R")   # just load the functions
 
 # needs SETTINGS, the integrator and the bases (not the NIMBLE model)
 if (!exists("SETTINGS")) {
   for (f in file.path("R", c("00_settings.R", "01_integrator.R", "02_bases.R"))) source(f)
 }
+source("simulated_data/study_paths.R")
 
 ###############################################
 # 1. TRUTH: posterior medians for population parameters
@@ -552,7 +554,7 @@ plot_truth_check <- function(sim, n_draw = 30, n_rep = 15, S = SETTINGS, seed = 
 }
 
 # Both check pages in ONE pdf. Look at this BEFORE fitting anything.
-plot_checks <- function(sim, file = "simulated_data/figures/sim_check_baseline.pdf") {
+plot_checks <- function(sim, file = file.path(SIM_ROOT, "check_figures", "sim_check_baseline.pdf")) {
   p1 <- plot_sim_check(sim); p2 <- plot_truth_check(sim)
   dir.create(dirname(file), showWarnings = FALSE, recursive = TRUE)
   pdf(file, width = 14, height = 9.5); print(p1); print(p2$fig); dev.off()
@@ -579,35 +581,64 @@ simulate_one <- function(truth, N = NULL, seed, verbose = TRUE) {
 #########################################
 # Simulate
 #########################################
-# Generate different scenarios and replicates
-#   which: scenario names to generate (default all). The seed depends only on the
-#   scenario and the replicate, so a dataset is the same whichever subset is run.
-simulate_all <- function(n_rep = 1L, which = NULL, seed0 = 1000L,
-                         out_dir = "simulated_data/datasets", verbose = TRUE) {
+# Generate different scenarios and replicates into simulated_data/data/<data_id>/
+#   which: scenario names to generate (default all).
+#   seed_scheme, fixed per data_id when it is first created:
+#     "common"      seed0 + rep: replicate r of EVERY scenario shares its random
+#                   numbers (covariates, visits, latent draws), so scenario
+#                   differences are not muddied by different datasets.
+#     "by_scenario" seed0 + 100 * s + rep (s = the scenario's position): what
+#                   data_id "v1" was made with.
+#   A dataset already on disk is never regenerated. If the generator code or the
+#   truth has changed since the data_id was created, this stops: use a new data_id.
+simulate_all <- function(n_rep = 1L, which = NULL, data_id, seed0 = 1000L,
+                         seed_scheme = c("common", "by_scenario"), verbose = TRUE) {
+  if (missing(data_id)) stop("name the data: data_id = \"...\"")
+  out_dir <- data_dir(data_id)
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-  scenarios <- make_scenarios(get_baseline_truth())
+  truth <- get_baseline_truth()
+  scenarios <- make_scenarios(truth)
+  gh <- gen_hash(truth)
+  info_file <- file.path(out_dir, "data_info.rds")
+  if (file.exists(info_file)) {
+    info <- readRDS(info_file)
+    if (!identical(info$gen_hash, gh))
+      stop(sprintf("the generator code or truth has changed since data '%s' was made; use a new data_id", data_id))
+    seed_scheme <- info$seed_scheme; seed0 <- info$seed0
+  } else {
+    seed_scheme <- match.arg(seed_scheme)
+    saveRDS(list(data_id = data_id, seed_scheme = seed_scheme, seed0 = seed0, gen_hash = gh,
+                 truth = truth, scenarios = scenarios, created = Sys.time(), git = git_state()),
+            info_file)
+  }
   if (is.null(which)) which <- names(scenarios)
   stopifnot(all(which %in% names(scenarios)))
   for (s in match(which, names(scenarios))) for (rep in seq_len(n_rep)) {
     nm <- names(scenarios)[s]
+    f <- file.path(out_dir, sprintf("sim_%s_rep%02d.rds", nm, rep))
+    if (file.exists(f)) next
     if (verbose) cat(sprintf("\n%s, replicate %d\n", nm, rep))
-    sim <- simulate_one(scenarios[[s]], seed = seed0 + 100L * s + rep, verbose = verbose)
-    sim$scenario <- nm; sim$rep <- rep
-    saveRDS(sim, file.path(out_dir, sprintf("sim_%s_rep%02d.rds", nm, rep)))
+    seed <- if (seed_scheme == "common") seed0 + rep else seed0 + 100L * s + rep
+    sim <- simulate_one(scenarios[[s]], seed = seed, verbose = verbose)
+    sim$scenario <- nm; sim$rep <- rep; sim$data_id <- data_id
+    saveRDS(sim, f)
   }
   invisible(which)
 }
 
 # One saved simulation: list(dat, truth, latent, seed, scenario, rep).
 # $dat is the simulated counterpart of load_amyloid_data().
-load_simulated <- function(scenario = "baseline", rep = 1L, out_dir = "simulated_data/datasets")
-  readRDS(file.path(out_dir, sprintf("sim_%s_rep%02d.rds", scenario, rep)))
+load_simulated <- function(scenario = "baseline", rep = 1L, data_id)
+  readRDS(data_dir(data_id, sprintf("sim_%s_rep%02d.rds", scenario, rep)))
 
 if (sys.nframe() == 0L) {
   # FIRST: one baseline dataset, checked, and plotted against the real cohort
   # (its scans against the real scans, its truth against the real-data fit)
   cat("baseline check dataset\n")
   plot_checks(simulate_one(get_baseline_truth(), seed = 1L))
-  # THEN: every scenario
-  simulate_all(n_rep = 1L)
+  # THEN: every scenario, into the data_id given on the command line
+  #     Rscript simulated_data/simulate_data.R <data_id> [n_rep]
+  args <- commandArgs(trailingOnly = TRUE)
+  if (length(args) >= 1)
+    simulate_all(n_rep = if (length(args) >= 2) as.integer(args[2]) else 1L, data_id = args[1])
 }

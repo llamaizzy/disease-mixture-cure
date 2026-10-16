@@ -1,0 +1,11 @@
+"scenario","rep","item","component","object","y_range","nise","rhat","quantity","nse"
+"meas_error_hi",1,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.0142093133588993,1.12526402588408,"rate curve r_A(y) on [0.585, 1.30]",0.0142093133588993
+"meas_error_hi",1,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.0219933665116496,1.00593220485955,"measurement-error variance on [0.50, 1.30]",0.0219933665116496
+"meas_error_hi",2,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.0145366146317933,1.05184653014287,"rate curve r_A(y) on [0.585, 1.30]",0.0145366146317933
+"meas_error_hi",2,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.0389867756367038,1.00588517468396,"measurement-error variance on [0.50, 1.30]",0.0389867756367038
+"meas_error_hi",3,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.0078233142027731,1.02010751318587,"rate curve r_A(y) on [0.585, 1.30]",0.0078233142027731
+"meas_error_hi",3,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.0305625357285003,1.00483653904681,"measurement-error variance on [0.50, 1.30]",0.0305625357285003
+"meas_error_hi",4,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.0252068696510086,1.07507997323214,"rate curve r_A(y) on [0.585, 1.30]",0.0252068696510086
+"meas_error_hi",4,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.0183895591535914,1.0067584783364,"measurement-error variance on [0.50, 1.30]",0.0183895591535914
+"meas_error_hi",5,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.0237663489091096,1.01717193162135,"rate curve r_A(y) on [0.585, 1.30]",0.0237663489091096
+"meas_error_hi",5,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.00185269492204771,1.00203593340923,"measurement-error variance on [0.50, 1.30]",0.00185269492204771

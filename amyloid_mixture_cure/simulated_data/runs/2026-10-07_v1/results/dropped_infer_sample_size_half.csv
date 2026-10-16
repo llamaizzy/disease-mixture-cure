@@ -1,0 +1,6 @@
+"scenario","rep","n_dropped","n_subjects","pct_dropped","n_true_accumulators","n_near_top_kept"
+"sample_size_half",1,0,550,0,0,1
+"sample_size_half",2,0,550,0,0,3
+"sample_size_half",3,0,550,0,0,1
+"sample_size_half",4,0,550,0,0,2
+"sample_size_half",5,0,550,0,0,0

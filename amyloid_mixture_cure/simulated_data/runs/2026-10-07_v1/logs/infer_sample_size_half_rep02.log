@@ -1,0 +1,41 @@
+sample_size_half rep 2, tier infer: 550 subjects, 1676 scans, 3 chains x 10000 iterations
+logProb at inits: 2607.12 (finite: TRUE; 3 x_tilde inits lowered)
+sample_size_half rep 2, tier infer: 550 subjects, 1676 scans, 3 chains x 10000 iterations
+dropped 0 of 550 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 550
+flagged, kept: 3 subjects start within 10% of the top of the grid
+logProb at inits: 2614.78 (finite: TRUE)
+compiled (1.0 min)
+  chain 1 start logProb 2614.78
+  chain 1: 1000/10000  (2.4 min)
+  chain 1: 2000/10000  (3.6 min)
+  chain 1: 3000/10000  (4.9 min)
+  chain 1: 4000/10000  (6.2 min)
+  chain 1: 5000/10000  (7.5 min)
+  chain 1: 6000/10000  (8.8 min)
+  chain 1: 7000/10000  (10.1 min)
+  chain 1: 8000/10000  (11.4 min)
+  chain 1: 9000/10000  (12.7 min)
+  chain 1: 10000/10000  (14.0 min)
+  chain 2 start logProb 2504.72
+  chain 2: 1000/10000  (15.4 min)
+  chain 2: 2000/10000  (16.6 min)
+  chain 2: 3000/10000  (17.9 min)
+  chain 2: 4000/10000  (19.2 min)
+  chain 2: 5000/10000  (20.4 min)
+  chain 2: 6000/10000  (21.7 min)
+  chain 2: 7000/10000  (24.9 min)
+  chain 2: 8000/10000  (31.6 min)
+  chain 2: 9000/10000  (32.9 min)
+  chain 2: 10000/10000  (34.4 min)
+  chain 3 start logProb 2617.32
+  chain 3: 1000/10000  (35.7 min)
+  chain 3: 2000/10000  (37.1 min)
+  chain 3: 3000/10000  (38.4 min)
+  chain 3: 4000/10000  (39.7 min)
+  chain 3: 5000/10000  (40.9 min)
+  chain 3: 6000/10000  (42.2 min)
+  chain 3: 7000/10000  (43.5 min)
+  chain 3: 8000/10000  (44.8 min)
+  chain 3: 9000/10000  (46.0 min)
+  chain 3: 10000/10000  (47.3 min)
+done in 47.3 min -> simulated_data/results/infer_sample_size_half_rep02_fit.rds

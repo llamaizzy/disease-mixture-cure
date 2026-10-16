@@ -1,0 +1,6 @@
+"scenario","rep","n_dropped","n_subjects","pct_dropped","n_true_accumulators","n_near_top_kept"
+"meas_error_lo",1,0,1101,0,0,3
+"meas_error_lo",2,0,1101,0,0,4
+"meas_error_lo",3,1,1101,0.0908265213442325,1,1
+"meas_error_lo",4,0,1101,0,0,2
+"meas_error_lo",5,1,1101,0.0908265213442325,1,3

@@ -1,0 +1,11 @@
+"scenario","rep","item","component","object","y_range","nise","rhat","quantity","nse"
+"baseline",1,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.0146916278476083,1.01513479578003,"rate curve r_A(y) on [0.585, 1.30]",0.0146916278476083
+"baseline",1,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.0023365504843708,1.00110499666583,"measurement-error variance on [0.50, 1.30]",0.0023365504843708
+"baseline",2,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.00595650596040095,1.1492722712546,"rate curve r_A(y) on [0.585, 1.30]",0.00595650596040095
+"baseline",2,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.000227313959975392,1.00542121678754,"measurement-error variance on [0.50, 1.30]",0.000227313959975392
+"baseline",3,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.00618044739166472,1.04212134833798,"rate curve r_A(y) on [0.585, 1.30]",0.00618044739166472
+"baseline",3,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.00902498169514315,1.00230897092983,"measurement-error variance on [0.50, 1.30]",0.00902498169514315
+"baseline",4,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.00561974842041603,1.01660421714359,"rate curve r_A(y) on [0.585, 1.30]",0.00561974842041603
+"baseline",4,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.000333354377654169,1.00678846167511,"measurement-error variance on [0.50, 1.30]",0.000333354377654169
+"baseline",5,"5","functional object","rate curve r_A(y)","[0.585, 1.30]",0.00591719678732359,1.17925128588852,"rate curve r_A(y) on [0.585, 1.30]",0.00591719678732359
+"baseline",5,"5","functional object","measurement-error variance omega(y)^2 df/(df-2)","[0.50, 1.30]",0.00420720308436733,1.016838415405,"measurement-error variance on [0.50, 1.30]",0.00420720308436733

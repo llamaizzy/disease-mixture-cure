@@ -1,0 +1,39 @@
+meas_error_hi rep 4, tier infer: 1101 subjects, 3381 scans, 3 chains x 10000 iterations
+dropped 0 of 1101 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 1101
+flagged, kept: 3 subjects start within 10% of the top of the grid
+logProb at inits: 1938.16 (finite: TRUE)
+compiled (1.6 min)
+  chain 1 start logProb 1938.16
+  chain 1: 1000/10000  (4.3 min)
+  chain 1: 2000/10000  (6.9 min)
+  chain 1: 3000/10000  (9.5 min)
+  chain 1: 4000/10000  (12.1 min)
+  chain 1: 5000/10000  (14.7 min)
+  chain 1: 6000/10000  (17.2 min)
+  chain 1: 7000/10000  (19.7 min)
+  chain 1: 8000/10000  (22.2 min)
+  chain 1: 9000/10000  (24.7 min)
+  chain 1: 10000/10000  (27.2 min)
+  chain 2 start logProb 1635.18
+  chain 2: 1000/10000  (29.8 min)
+  chain 2: 2000/10000  (32.3 min)
+  chain 2: 3000/10000  (40.6 min)
+  chain 2: 4000/10000  (52.8 min)
+  chain 2: 5000/10000  (55.4 min)
+  chain 2: 6000/10000  (58.0 min)
+  chain 2: 7000/10000  (60.6 min)
+  chain 2: 8000/10000  (63.2 min)
+  chain 2: 9000/10000  (65.8 min)
+  chain 2: 10000/10000  (68.4 min)
+  chain 3 start logProb 1935.94
+  chain 3: 1000/10000  (71.1 min)
+  chain 3: 2000/10000  (73.8 min)
+  chain 3: 3000/10000  (76.3 min)
+  chain 3: 4000/10000  (79.0 min)
+  chain 3: 5000/10000  (81.5 min)
+  chain 3: 6000/10000  (84.1 min)
+  chain 3: 7000/10000  (86.7 min)
+  chain 3: 8000/10000  (89.3 min)
+  chain 3: 9000/10000  (91.8 min)
+  chain 3: 10000/10000  (94.4 min)
+done in 94.4 min -> simulated_data/results/infer_meas_error_hi_rep04_fit.rds

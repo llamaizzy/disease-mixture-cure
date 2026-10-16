@@ -1,0 +1,39 @@
+onset_spread_lo rep 5, tier infer: 1101 subjects, 3378 scans, 3 chains x 10000 iterations
+dropped 0 of 1101 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 1101
+flagged, kept: 1 subjects start within 10% of the top of the grid
+logProb at inits: 5379.06 (finite: TRUE)
+compiled (1.8 min)
+  chain 1 start logProb 5379.06
+  chain 1: 1000/10000  (4.4 min)
+  chain 1: 2000/10000  (7.0 min)
+  chain 1: 3000/10000  (9.6 min)
+  chain 1: 4000/10000  (12.2 min)
+  chain 1: 5000/10000  (14.7 min)
+  chain 1: 6000/10000  (17.2 min)
+  chain 1: 7000/10000  (19.8 min)
+  chain 1: 8000/10000  (22.3 min)
+  chain 1: 9000/10000  (24.8 min)
+  chain 1: 10000/10000  (27.5 min)
+  chain 2 start logProb 5169.85
+  chain 2: 1000/10000  (30.2 min)
+  chain 2: 2000/10000  (32.8 min)
+  chain 2: 3000/10000  (35.4 min)
+  chain 2: 4000/10000  (37.9 min)
+  chain 2: 5000/10000  (40.4 min)
+  chain 2: 6000/10000  (42.9 min)
+  chain 2: 7000/10000  (45.4 min)
+  chain 2: 8000/10000  (48.0 min)
+  chain 2: 9000/10000  (50.6 min)
+  chain 2: 10000/10000  (53.2 min)
+  chain 3 start logProb 4763.05
+  chain 3: 1000/10000  (55.8 min)
+  chain 3: 2000/10000  (65.2 min)
+  chain 3: 3000/10000  (80.4 min)
+  chain 3: 4000/10000  (83.1 min)
+  chain 3: 5000/10000  (85.7 min)
+  chain 3: 6000/10000  (88.2 min)
+  chain 3: 7000/10000  (90.8 min)
+  chain 3: 8000/10000  (93.4 min)
+  chain 3: 9000/10000  (95.9 min)
+  chain 3: 10000/10000  (98.4 min)
+done in 98.4 min -> simulated_data/results/infer_onset_spread_lo_rep05_fit.rds

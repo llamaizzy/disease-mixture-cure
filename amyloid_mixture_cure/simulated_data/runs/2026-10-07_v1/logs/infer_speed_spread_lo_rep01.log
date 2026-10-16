@@ -1,0 +1,39 @@
+speed_spread_lo rep 1, tier infer: 1101 subjects, 3358 scans, 3 chains x 10000 iterations
+dropped 0 of 1101 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 1101
+flagged, kept: 1 subjects start within 10% of the top of the grid
+logProb at inits: 5156.68 (finite: TRUE)
+compiled (1.7 min)
+  chain 1 start logProb 5156.68
+  chain 1: 1000/10000  (4.3 min)
+  chain 1: 2000/10000  (6.9 min)
+  chain 1: 3000/10000  (9.4 min)
+  chain 1: 4000/10000  (11.8 min)
+  chain 1: 5000/10000  (14.3 min)
+  chain 1: 6000/10000  (17.1 min)
+  chain 1: 7000/10000  (33.4 min)
+  chain 1: 8000/10000  (42.7 min)
+  chain 1: 9000/10000  (46.6 min)
+  chain 1: 10000/10000  (49.1 min)
+  chain 2 start logProb 4909.64
+  chain 2: 1000/10000  (56.8 min)
+  chain 2: 2000/10000  (73.1 min)
+  chain 2: 3000/10000  (75.5 min)
+  chain 2: 4000/10000  (78.0 min)
+  chain 2: 5000/10000  (80.5 min)
+  chain 2: 6000/10000  (83.0 min)
+  chain 2: 7000/10000  (85.6 min)
+  chain 2: 8000/10000  (88.0 min)
+  chain 2: 9000/10000  (90.6 min)
+  chain 2: 10000/10000  (93.2 min)
+  chain 3 start logProb 5157.90
+  chain 3: 1000/10000  (96.0 min)
+  chain 3: 2000/10000  (98.5 min)
+  chain 3: 3000/10000  (101.0 min)
+  chain 3: 4000/10000  (103.5 min)
+  chain 3: 5000/10000  (106.2 min)
+  chain 3: 6000/10000  (109.0 min)
+  chain 3: 7000/10000  (111.5 min)
+  chain 3: 8000/10000  (114.0 min)
+  chain 3: 9000/10000  (116.6 min)
+  chain 3: 10000/10000  (119.2 min)
+done in 119.2 min -> simulated_data/results/infer_speed_spread_lo_rep01_fit.rds

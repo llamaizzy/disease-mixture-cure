@@ -6,3 +6,10 @@ results/*.log
 .httr-oauth
 .DS_Store
 .quarto
+
+# simulation study: datasets and fits are rebuilt from the seeds and code;
+# keep the small info files, CSV results, logs and figures
+simulated_data/data/**/*.rds
+!simulated_data/data/*/data_info.rds
+simulated_data/runs/**/*.rds
+!simulated_data/runs/*/run_info.rds

@@ -1,0 +1,43 @@
+onset_spread_hi rep 1, tier infer: 1101 subjects, 3430 scans, 3 chains x 10000 iterations
+logProb at inits: 4769.58 (finite: TRUE; 8 x_tilde inits lowered)
+compiled (1.6 min)
+  chain 1 start logProb 4769.58
+onset_spread_hi rep 1, tier infer: 1101 subjects, 3430 scans, 3 chains x 10000 iterations
+dropped 0 of 1101 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 1101
+flagged, kept: 8 subjects start within 10% of the top of the grid
+logProb at inits: 4779.68 (finite: TRUE)
+compiled (1.6 min)
+  chain 1 start logProb 4779.68
+  chain 1: 1000/10000  (4.3 min)
+  chain 1: 2000/10000  (6.9 min)
+  chain 1: 3000/10000  (9.4 min)
+  chain 1: 4000/10000  (12.0 min)
+  chain 1: 5000/10000  (14.6 min)
+  chain 1: 6000/10000  (17.2 min)
+  chain 1: 7000/10000  (19.7 min)
+  chain 1: 8000/10000  (22.2 min)
+  chain 1: 9000/10000  (24.8 min)
+  chain 1: 10000/10000  (27.4 min)
+  chain 2 start logProb 4747.52
+  chain 2: 1000/10000  (30.2 min)
+  chain 2: 2000/10000  (32.7 min)
+  chain 2: 3000/10000  (35.3 min)
+  chain 2: 4000/10000  (37.8 min)
+  chain 2: 5000/10000  (40.4 min)
+  chain 2: 6000/10000  (43.0 min)
+  chain 2: 7000/10000  (45.6 min)
+  chain 2: 8000/10000  (48.2 min)
+  chain 2: 9000/10000  (50.8 min)
+  chain 2: 10000/10000  (53.4 min)
+  chain 3 start logProb 4784.16
+  chain 3: 1000/10000  (56.2 min)
+  chain 3: 2000/10000  (58.7 min)
+  chain 3: 3000/10000  (61.3 min)
+  chain 3: 4000/10000  (63.9 min)
+  chain 3: 5000/10000  (66.5 min)
+  chain 3: 6000/10000  (69.1 min)
+  chain 3: 7000/10000  (71.7 min)
+  chain 3: 8000/10000  (74.3 min)
+  chain 3: 9000/10000  (76.9 min)
+  chain 3: 10000/10000  (79.6 min)
+done in 79.6 min -> simulated_data/results/infer_onset_spread_hi_rep01_fit.rds

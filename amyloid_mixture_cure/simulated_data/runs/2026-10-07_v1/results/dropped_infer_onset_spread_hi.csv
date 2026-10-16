@@ -1,0 +1,6 @@
+"scenario","rep","n_dropped","n_subjects","pct_dropped","n_true_accumulators","n_near_top_kept"
+"onset_spread_hi",1,0,1101,0,0,8
+"onset_spread_hi",2,0,1101,0,0,8
+"onset_spread_hi",3,0,1101,0,0,7
+"onset_spread_hi",4,1,1101,0.0908265213442325,1,12
+"onset_spread_hi",5,0,1101,0,0,7

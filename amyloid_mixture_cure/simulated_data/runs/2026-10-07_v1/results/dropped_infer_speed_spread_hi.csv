@@ -1,0 +1,6 @@
+"scenario","rep","n_dropped","n_subjects","pct_dropped","n_true_accumulators","n_near_top_kept"
+"speed_spread_hi",1,2,1101,0.181653042688465,2,22
+"speed_spread_hi",2,2,1101,0.181653042688465,2,23
+"speed_spread_hi",3,2,1101,0.181653042688465,2,32
+"speed_spread_hi",4,1,1101,0.0908265213442325,1,20
+"speed_spread_hi",5,1,1101,0.0908265213442325,1,24

@@ -1,0 +1,78 @@
+baseline rep 6, tier infer: 1101 subjects, 3408 scans, 3 chains x 10000 iterations
+dropped 0 of 1101 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 1101
+flagged, kept: 3 subjects start within 10% of the top of the grid
+logProb at inits: 4819.76 (finite: TRUE)
+baseline rep 6, tier infer: 1101 subjects, 3408 scans, 3 chains x 10000 iterations
+dropped 0 of 1101 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 1101
+flagged, kept: 3 subjects start within 10% of the top of the grid
+logProb at inits: 4819.76 (finite: TRUE)
+compiled (4.1 min)
+  chain 1 start logProb 4819.76
+compiled (4.2 min)
+  chain 1 start logProb 4819.76
+  chain 1: 1000/10000  (8.5 min)
+  chain 1: 1000/10000  (8.6 min)
+  chain 1: 2000/10000  (12.7 min)
+  chain 1: 2000/10000  (12.7 min)
+  chain 1: 3000/10000  (16.7 min)
+  chain 1: 3000/10000  (16.8 min)
+  chain 1: 4000/10000  (20.8 min)
+  chain 1: 4000/10000  (20.9 min)
+  chain 1: 5000/10000  (24.8 min)
+  chain 1: 5000/10000  (24.8 min)
+  chain 1: 6000/10000  (28.8 min)
+  chain 1: 6000/10000  (28.7 min)
+  chain 1: 7000/10000  (32.8 min)
+  chain 1: 7000/10000  (32.8 min)
+  chain 1: 8000/10000  (36.8 min)
+  chain 1: 8000/10000  (36.8 min)
+  chain 1: 9000/10000  (40.8 min)
+  chain 1: 9000/10000  (40.8 min)
+  chain 1: 10000/10000  (44.9 min)
+  chain 2 start logProb 4590.74
+  chain 1: 10000/10000  (44.9 min)
+  chain 2 start logProb 4590.74
+  chain 2: 1000/10000  (49.3 min)
+  chain 2: 1000/10000  (49.3 min)
+  chain 2: 2000/10000  (53.3 min)
+  chain 2: 2000/10000  (53.3 min)
+  chain 2: 3000/10000  (57.4 min)
+  chain 2: 3000/10000  (57.5 min)
+  chain 2: 4000/10000  (61.6 min)
+  chain 2: 4000/10000  (61.6 min)
+  chain 2: 5000/10000  (65.7 min)
+  chain 2: 5000/10000  (65.7 min)
+  chain 2: 6000/10000  (69.9 min)
+  chain 2: 6000/10000  (69.9 min)
+  chain 2: 7000/10000  (73.9 min)
+  chain 2: 7000/10000  (73.9 min)
+  chain 2: 8000/10000  (78.1 min)
+  chain 2: 8000/10000  (78.1 min)
+  chain 2: 9000/10000  (82.3 min)
+  chain 2: 9000/10000  (82.4 min)
+  chain 2: 10000/10000  (86.5 min)
+  chain 3 start logProb 4817.62
+  chain 2: 10000/10000  (86.5 min)
+  chain 3 start logProb 4817.62
+  chain 3: 1000/10000  (91.1 min)
+  chain 3: 1000/10000  (91.0 min)
+  chain 3: 2000/10000  (95.3 min)
+  chain 3: 2000/10000  (95.4 min)
+  chain 3: 3000/10000  (99.6 min)
+  chain 3: 3000/10000  (99.5 min)
+  chain 3: 4000/10000  (103.8 min)
+  chain 3: 4000/10000  (103.8 min)
+  chain 3: 5000/10000  (108.0 min)
+  chain 3: 5000/10000  (108.0 min)
+  chain 3: 6000/10000  (112.1 min)
+  chain 3: 6000/10000  (112.1 min)
+  chain 3: 7000/10000  (116.2 min)
+  chain 3: 7000/10000  (116.1 min)
+  chain 3: 8000/10000  (120.3 min)
+  chain 3: 8000/10000  (120.2 min)
+  chain 3: 9000/10000  (124.2 min)
+  chain 3: 9000/10000  (124.8 min)
+  chain 3: 10000/10000  (129.0 min)
+done in 129.1 min -> simulated_data/results/infer_baseline_rep06_fit.rds
+  chain 3: 10000/10000  (128.7 min)
+done in 128.7 min -> simulated_data/results/infer_baseline_rep06_fit.rds

@@ -4,8 +4,11 @@
 ##  Run from the package root, after fit_simulated_data.R has produced fits:
 ##
 ##      source("simulated_data/evaluate_simulation.R")
-##      ev <- evaluate_scenario("baseline")          # one scenario
-##      ev <- evaluate_all()                         # every scenario with fits
+##      ev <- evaluate_scenario("baseline", run_id = "2026-10-07_v1")   # one scenario
+##      ev <- evaluate_all(run_id = "2026-10-07_v1")                    # every scenario with fits
+##      cmp <- compare_runs(c("2026-10-07_v1", "2026-10-20_phi-sd2"))   # stack runs' long files
+##
+##  Reads runs/<run_id>/fits/, writes runs/<run_id>/results/.
 ##
 ##
 ##  FIVE TABLES
@@ -65,6 +68,7 @@
 ## =====================================================================
 
 if (!exists("pool_paired")) for (f in sort(list.files("R", full.names = TRUE))) source(f)
+if (!exists("run_dir")) source("simulated_data/study_paths.R")
 
 EVAL <- list(
   estimator = "median",            # "mean" or "median" of the posterior
@@ -333,16 +337,20 @@ print_tables <- function(tabs, header = "") {
 ## ---- one scenario --------------------------------------------------------
 ##  Writes eval_<tier>_<scenario>_table1.csv ... _table5.csv,
 ##  and the per-replicate values to eval_<tier>_<scenario>_by_sim_*.csv.
-evaluate_scenario <- function(scenario = "baseline", tier = "infer",
-                              out_dir = "simulated_data/results", write = TRUE, verbose = TRUE) {
-  files <- list.files(out_dir, sprintf("^%s_%s_rep[0-9]+_fit\\.rds$", tier, scenario), full.names = TRUE)
+evaluate_scenario <- function(scenario = "baseline", tier = "infer", run_id,
+                              write = TRUE, verbose = TRUE) {
+  out_dir <- run_dir(run_id, "results")
+  files <- list.files(run_dir(run_id, "fits"), sprintf("^%s_%s_rep[0-9]+_fit\\.rds$", tier, scenario),
+                      full.names = TRUE)
   if (!length(files)) { if (verbose) message("no fits for ", tier, " / ", scenario); return(NULL) }
   reps <- lapply(files, function(f) {
     if (verbose) message("  scoring ", basename(f))
     evaluate_one(readRDS(f))
   })
   res <- summarise_tables(reps)
+  res$long <- cbind(run = run_id, res$long, stringsAsFactors = FALSE)
   if (write) {
+    dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
     for (k in names(res$tables))
       write.csv(res$tables[[k]], file.path(out_dir, sprintf("eval_%s_%s_%s.csv", tier, scenario, k)),
                 row.names = FALSE)
@@ -350,8 +358,8 @@ evaluate_scenario <- function(scenario = "baseline", tier = "infer",
       write.csv(res$by_sim[[nm]], file.path(out_dir, sprintf("eval_%s_%s_by_sim_%s.csv", tier, scenario, nm)),
                 row.names = FALSE)
   }
-  if (verbose) print_tables(res$tables, sprintf("%s / %s: %d replicates (estimator: posterior %s)",
-                                                scenario, tier, length(files), EVAL$estimator))
+  if (verbose) print_tables(res$tables, sprintf("%s / %s, run %s: %d replicates (estimator: posterior %s)",
+                                                scenario, tier, run_id, length(files), EVAL$estimator))
   invisible(res)
 }
 
@@ -395,16 +403,18 @@ print_across <- function(long) {
 ##  Writes eval_<tier>_all_long.csv (one row per scenario x quantity) and, built
 ##  from it, eval_<tier>_all_table1.csv ... _table5.csv (one column per scenario,
 ##  one block of rows per displayed metric).
-evaluate_all <- function(tier = "infer", scenarios = NULL, out_dir = "simulated_data/results") {
+evaluate_all <- function(tier = "infer", run_id, scenarios = NULL) {
+  out_dir <- run_dir(run_id, "results")
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
   if (is.null(scenarios)) {
-    f <- list.files(out_dir, sprintf("^%s_.+_rep[0-9]+_fit\\.rds$", tier))
+    f <- list.files(run_dir(run_id, "fits"), sprintf("^%s_.+_rep[0-9]+_fit\\.rds$", tier))
     scenarios <- unique(sub(sprintf("^%s_(.+)_rep[0-9]+_fit\\.rds$", tier), "\\1", f))
   }
   scenarios <- c(intersect(names(SCEN), scenarios), setdiff(scenarios, names(SCEN)))   # display order
-  res <- setNames(lapply(scenarios, evaluate_scenario, tier = tier, out_dir = out_dir,
+  res <- setNames(lapply(scenarios, evaluate_scenario, tier = tier, run_id = run_id,
                          verbose = FALSE), scenarios)
   res <- res[!vapply(res, is.null, TRUE)]
-  if (!length(res)) stop("no fits found in ", out_dir)
+  if (!length(res)) stop("no fits found in ", run_dir(run_id, "fits"))
 
   long <- do.call(rbind, lapply(res, `[[`, "long")); rownames(long) <- NULL
   lev  <- unique(long$scenario)
@@ -429,7 +439,23 @@ evaluate_all <- function(tier = "infer", scenarios = NULL, out_dir = "simulated_
   invisible(list(by_scenario = res, long = long, wide = wide))
 }
 
+## ---- across runs ---------------------------------------------------------
+##  The long files of several runs stacked, one row per run x scenario x
+##  quantity, e.g. to set a refit beside the run it changes:
+##      cmp <- compare_runs(c("2026-10-07_v1", "2026-10-20_phi-sd2"))
+##      subset(cmp, quantity == "phi[2]", c(run, scenario, bias, bias_mcse, coverage))
+compare_runs <- function(run_ids, tier = "infer") {
+  do.call(rbind, lapply(run_ids, function(id) {
+    f <- run_dir(id, "results", sprintf("eval_%s_all_long.csv", tier))
+    if (!file.exists(f)) stop(sprintf("no %s: run evaluate_all(run_id = \"%s\") first", f, id))
+    d <- read.csv(f, stringsAsFactors = FALSE)
+    if (!"run" %in% names(d)) d <- cbind(run = id, d)
+    d
+  }))
+}
+
 if (sys.nframe() == 0L) {
   args <- commandArgs(trailingOnly = TRUE)
-  evaluate_all(tier = if (length(args) >= 1) args[1] else "infer")
+  if (!length(args)) stop("usage: Rscript simulated_data/evaluate_simulation.R <run_id> [tier]")
+  evaluate_all(tier = if (length(args) >= 2) args[2] else "infer", run_id = args[1])
 }

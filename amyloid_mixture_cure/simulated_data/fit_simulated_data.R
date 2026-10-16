@@ -3,17 +3,20 @@
 ##  Run from the package root:
 ##
 ##      source("simulated_data/fit_simulated_data.R")
-##      fit <- fit_simulated_model(rep = 1, tier = "smoke")    # ~1 min, a check
-##      run_simulation_study(n_sim = 5, tier = "infer")        # ~1.5 h, 5 fits in parallel
-##      recovery_summary()                                     # the coverage / MSE table
-##      plot_sim_fits()                                        # the fitted figures
+##      simulate_all(n_rep = 10, data_id = "crn-v1")            # the datasets, once
+##      fit <- fit_simulated_model(rep = 1, tier = "smoke",     # ~1 min, a check
+##                                 run_id = "scratch", data_id = "crn-v1")
+##      run_simulation_study(n_sim = 10, tier = "infer",        # 10 fits in parallel
+##                           run_id = "2026-10-20_crn", data_id = "crn-v1")
+##      recovery_summary(run_id = "2026-10-20_crn")             # the coverage / MSE table
+##      plot_sim_fits(run_id = "2026-10-20_crn")                # the fitted figures
 ##
-##  or, for the whole study in one go:
+##  or, for one scenario in one go:
 ##
-##      Rscript simulated_data/fit_simulated_data.R [tier] [n_sim] [scenario]
+##      Rscript simulated_data/fit_simulated_data.R <run_id> <data_id> [tier] [n_sim] [scenario]
 ##
-##  Fits and tables are written to simulated_data/results/, figures to
-##  simulated_data/figures/.
+##  Everything a run produces goes under simulated_data/runs/<run_id>/
+##  (fits/, logs/, results/, figures/); see study_paths.R.
 ## =====================================================================
 
 for (f in sort(list.files("R", full.names = TRUE))) source(f)
@@ -21,11 +24,11 @@ source("simulated_data/simulate_data.R")
 source("simulated_data/evaluate_simulation.R")
 ## ---- data -----------------------------------------------------------
 ## Simulated cohorts in the format of data/adni_amyloid.rds, written by
-## simulate_all() to simulated_data/datasets/. Each file carries the data
+## simulate_all() to simulated_data/data/<data_id>/. Each file carries the data
 ## AND the truth that generated it (population parameters and per-subject
 ## latent quantities), which is what the recovery scores are computed against.
 ##
-##      sim <- load_simulated("baseline", rep = 1)     # $dat, $truth, $latent
+##      sim <- load_simulated("baseline", rep = 1, data_id = "v1")   # $dat, $truth, $latent
 
 ## ---- subjects who start off the grid -------------------------------
 ##  At the initial values, a subject's accumulator trajectory can run past the
@@ -137,25 +140,29 @@ configure_samplers <- function(model, dat, bA, vA) {
 ##     basis; with different knots it is a different parameter and "does the
 ##     interval cover the true nu" would have no meaning.
 ##   * the truth and the latent quantities are saved with the fit.
+##  The fit goes to runs/<run_id>/fits/ with a stamp of the code, settings and
+##  data that produced it (fit$stamp; see study_paths.R).
+TIER_CFG <- list(smoke  = list(n_sub = 250L, n_iter =   300L, chunk =  150L),
+                 struct = list(n_sub =  NA_integer_, n_iter =  800L, chunk = 400L),
+                 infer  = list(n_sub =  NA_integer_, n_iter = 10000L, chunk = 1000L))
+
 fit_simulated_model <- function(scenario = "baseline", rep = 1L,
                                 tier = c("smoke", "struct", "infer"),
                                 n_chains = 3L, seed = 100L, n_iter = NULL,
-                                data_dir = "simulated_data/datasets",
-                                out_dir = "simulated_data/results", verbose = TRUE) {
+                                run_id, data_id = NULL, verbose = TRUE) {
   tier <- match.arg(tier)
-  cfg <- switch(tier,
-                smoke  = list(n_sub = 250L, n_iter =   300L, chunk =  150L),
-                struct = list(n_sub =  NA_integer_, n_iter =  800L, chunk = 400L),
-                infer  = list(n_sub =  NA_integer_, n_iter = 10000L, chunk = 1000L))
+  cfg <- TIER_CFG[[tier]]
   if (!is.null(n_iter)) cfg$n_iter <- as.integer(n_iter)
-  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  data_id <- init_run(run_id, data_id)
+  out_dir <- run_dir(run_id, "fits")
   tag <- sprintf("%s_%s_rep%02d", tier, scenario, rep)
-  log_file <- file.path(out_dir, sprintf("%s.log", tag))
+  log_file <- run_dir(run_id, "logs", sprintf("%s.log", tag))
   t0 <- Sys.time(); el <- function() as.numeric(difftime(Sys.time(), t0, units = "mins"))
   say <- function(...) { msg <- sprintf(...); cat(msg, file = log_file, append = TRUE)
     if (verbose) { cat(msg); flush.console() } }
-  
-  sim <- load_simulated(scenario, rep, data_dir)
+
+  sim <- load_simulated(scenario, rep, data_id)
+  stamp <- fit_stamp(sim, tier, n_chains, cfg$n_iter, seed)
   dat <- sim$dat; latent <- sim$latent[c("Z", "alpha", "delta", "z", "b", "x_tilde")]
   if (!is.na(cfg$n_sub) && cfg$n_sub < dat$n_subj) {     # subsample SUBJECTS, never visits
     set.seed(7); k <- sort(sample(dat$n_subj, cfg$n_sub))
@@ -202,6 +209,10 @@ fit_simulated_model <- function(scenario = "baseline", rep = 1L,
   partial <- file.path(out_dir, sprintf("%s_partial.rds", tag))
   if (file.exists(partial)) {
     old <- readRDS(partial)
+    if (length(stamp_mismatch(old$stamp, stamp))) {     # made by other code: start over
+      say("  discarding an interrupted run made with different code or data\n")
+      old <- list(chains = list())
+    }
     for (ch in seq_len(min(n_chains, length(old$chains))))
       if (NROW(old$chains[[ch]]) == cfg$n_iter) {
         chains[[ch]] <- old$chains[[ch]]; subj[[ch]] <- old$subj[[ch]]
@@ -232,13 +243,14 @@ fit_simulated_model <- function(scenario = "baseline", rep = 1L,
       cmc$run(n, reset = (it == 0), progressBar = FALSE); it <- it + n
       chains[[ch]] <- as.matrix(cmc$mvSamples)
       subj[[ch]]   <- as.matrix(cmc$mvSamples2)
-      saveRDS(list(chains = chains, subj = subj), partial)
+      saveRDS(list(chains = chains, subj = subj, stamp = stamp), partial)
       say("  chain %d: %d/%d  (%.1f min)\n", ch, it, cfg$n_iter, el())
     }
   }
   fit <- list(tier = tier, scenario = scenario, rep = rep, chains = chains, subj = subj,
               dat = dat, truth = sim$truth, latent = latent, dropped = dropped, data_seed = sim$seed,
-              bA = bA, vA = vA, settings = SETTINGS, minutes = el())
+              bA = bA, vA = vA, settings = SETTINGS, minutes = el(),
+              run_id = run_id, data_id = data_id, stamp = stamp)
   fit_file <- file.path(out_dir, sprintf("%s_fit.rds", tag))
   saveRDS(fit, fit_file)
   unlink(partial)
@@ -296,15 +308,16 @@ recovery_one <- function(fit, burn_frac = 1/3) {
 ##  mse       : average of (posterior median - truth)^2;  rmse = sqrt(mse)
 ##  max_rhat  : worst R-hat over the fits. An interval from a chain that has
 ##              not converged is not a 95% interval, so read coverage with it.
-fit_files <- function(scenario, tier, out_dir) {
-  files <- list.files(out_dir, sprintf("^%s_%s_rep[0-9]+_fit\\.rds$", tier, scenario), full.names = TRUE)
-  if (!length(files)) stop("no fits found for ", tier, " / ", scenario, " in ", out_dir)
+fit_files <- function(scenario, tier, run_id) {
+  d <- run_dir(run_id, "fits")
+  files <- list.files(d, sprintf("^%s_%s_rep[0-9]+_fit\\.rds$", tier, scenario), full.names = TRUE)
+  if (!length(files)) stop("no fits found for ", tier, " / ", scenario, " in ", d)
   files
 }
 
-recovery_summary <- function(scenario = "baseline", tier = "infer",
-                             out_dir = "simulated_data/results", write = TRUE) {
-  files <- fit_files(scenario, tier, out_dir)
+recovery_summary <- function(scenario = "baseline", tier = "infer", run_id, write = TRUE) {
+  files <- fit_files(scenario, tier, run_id)
+  out_dir <- run_dir(run_id, "results")
   by_sim <- do.call(rbind, lapply(files, function(f) recovery_one(readRDS(f))))
   by_sim$parameter <- factor(by_sim$parameter, unique(by_sim$parameter))
   tab <- do.call(rbind, lapply(split(by_sim, by_sim$parameter), function(d) {
@@ -333,9 +346,9 @@ recovery_summary <- function(scenario = "baseline", tier = "infer",
 ##  many, how many of them were true accumulators, and how many were kept
 ##  but flagged for starting within 10% of the top of the grid. Fits made before
 ##  subjects were dropped (when inits were repaired instead) show NA.
-dropped_summary <- function(scenario = "baseline", tier = "infer",
-                            out_dir = "simulated_data/results", write = TRUE) {
-  d <- do.call(rbind, lapply(fit_files(scenario, tier, out_dir), function(f) {
+dropped_summary <- function(scenario = "baseline", tier = "infer", run_id, write = TRUE) {
+  out_dir <- run_dir(run_id, "results")
+  d <- do.call(rbind, lapply(fit_files(scenario, tier, run_id), function(f) {
     fit <- readRDS(f); dr <- fit$dropped
     if (is.null(dr)) dr <- list(n = NA, n_total = NA, n_true_accumulators = NA, n_near_top = NA)
     data.frame(scenario = scenario, rep = fit$rep, n_dropped = dr$n, n_subjects = dr$n_total,
@@ -359,14 +372,14 @@ dropped_summary <- function(scenario = "baseline", tier = "infer",
 ##     by side.
 ##  The pages keep their own sizes, so they are drawn separately and joined
 ##  with qpdf.
-plot_sim_fits <- function(scenario = "baseline", tier = "infer", n_draw = 60,
-                          out_dir = "simulated_data/results", fig_dir = "simulated_data/figures") {
+plot_sim_fits <- function(scenario = "baseline", tier = "infer", run_id, n_draw = 60) {
   if (!requireNamespace("qpdf", quietly = TRUE)) stop("install.packages(\"qpdf\") to join the pages")
+  fig_dir <- run_dir(run_id, "figures")
   dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
   tmp <- tempfile("simfit_"); dir.create(tmp)
   pages <- file.path(tmp, "rate_curves.pdf")
   bands <- list()
-  for (f in fit_files(scenario, tier, out_dir)) {
+  for (f in fit_files(scenario, tier, run_id)) {
     fit <- readRDS(f); rp <- sprintf("rep%02d", fit$rep)
     cat(sprintf("\n%s: %d of %d subjects are true accumulators\n", rp, sum(fit$latent$Z), fit$dat$n_subj))
     sq <- subject_quantities(fit, n_draw = n_draw)
@@ -411,31 +424,45 @@ plot_sim_fits <- function(scenario = "baseline", tier = "infer", n_draw = 60,
 ## ---- the study -------------------------------------------------------
 ##  Simulate n_sim replicates of one scenario and fit each. The fits run in
 ##  PARALLEL, one R process per replicate (NIMBLE compiles into the process's
-##  own temp directory, so separate processes cannot collide). A replicate
-##  whose fit is already on disk is skipped, so an interrupted study resumes.
+##  own temp directory, so separate processes cannot collide).
+##
+##  A replicate whose fit is already in the run is skipped ONLY if its stamp
+##  matches what this call would produce (same model code, settings, data,
+##  tier, chains, iterations, seed), so an interrupted study resumes. A fit
+##  that does not match stops the study: a run never mixes code versions.
+##  Start a new run_id instead, or delete that fit on purpose.
 run_simulation_study <- function(n_sim = 10L, scenario = "baseline",
                                  tier = c("infer", "struct", "smoke"), n_chains = 3L,
                                  n_iter = NULL, cores = min(n_sim, parallel::detectCores() - 2L),
-                                 out_dir = "simulated_data/results") {
+                                 seed = 100L, run_id, data_id = NULL, notes = "") {
   tier <- match.arg(tier)
-  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-  simulate_all(n_rep = n_sim, which = scenario, verbose = FALSE)
-  done <- file.exists(file.path(out_dir, sprintf("%s_%s_rep%02d_fit.rds", tier, scenario, seq_len(n_sim))))
+  data_id <- init_run(run_id, data_id, notes)
+  simulate_all(n_rep = n_sim, which = scenario, data_id = data_id, verbose = FALSE)
+  n_it <- if (is.null(n_iter)) TIER_CFG[[tier]]$n_iter else as.integer(n_iter)
+  files <- run_dir(run_id, "fits", sprintf("%s_%s_rep%02d_fit.rds", tier, scenario, seq_len(n_sim)))
+  done <- file.exists(files)
+  for (r in which(done)) {
+    want <- fit_stamp(load_simulated(scenario, r, data_id), tier, n_chains, n_it, seed)
+    bad  <- stamp_mismatch(readRDS(files[r])$stamp, want)
+    if (length(bad))
+      stop(sprintf("%s in run '%s' was made differently (%s). Use a new run_id, or delete that fit on purpose.",
+                   basename(files[r]), run_id, paste(bad, collapse = ", ")))
+  }
   todo <- which(!done)
-  cat(sprintf("%s / %s: %d replicates, %d to fit on %d cores (logs in %s)\n",
-              scenario, tier, n_sim, length(todo), min(cores, length(todo)), out_dir))
+  cat(sprintf("%s / %s, run %s on data %s: %d replicates, %d to fit on %d cores\n",
+              scenario, tier, run_id, data_id, n_sim, length(todo), min(cores, length(todo))))
   if (length(todo)) {
     cl <- parallel::makeCluster(min(cores, length(todo)))
     on.exit(parallel::stopCluster(cl))
     parallel::clusterCall(cl, function(wd) { setwd(wd)
       source("simulated_data/fit_simulated_data.R"); NULL }, getwd())
-    parallel::clusterApplyLB(cl, todo, function(r, scenario, tier, n_chains, n_iter, out_dir) {
-      fit_simulated_model(scenario, r, tier, n_chains = n_chains, n_iter = n_iter,
-                          out_dir = out_dir, verbose = FALSE); r
-    }, scenario, tier, n_chains, n_iter, out_dir)
+    parallel::clusterApplyLB(cl, todo, function(r, scenario, tier, n_chains, n_iter, seed, run_id) {
+      fit_simulated_model(scenario, r, tier, n_chains = n_chains, n_iter = n_iter, seed = seed,
+                          run_id = run_id, verbose = FALSE); r
+    }, scenario, tier, n_chains, n_iter, seed, run_id)
   }
-  dropped_summary(scenario, tier, out_dir)
-  recovery_summary(scenario, tier, out_dir)
+  dropped_summary(scenario, tier, run_id)
+  recovery_summary(scenario, tier, run_id)
 }
 
 ## ---- the headline numbers -------------------------------------------
@@ -481,12 +508,69 @@ convergence <- function(fit, burn_frac = 1/3, n_show = 8) {
   invisible(r)
 }
 
+## ---- traceplots --------------------------------------------------------
+##  One panel per parameter, one line per chain, over the FULL chain; the
+##  discarded first `burn_frac` of each chain is shaded. A dashed line marks
+##  the true value when the fit is of simulated data. R-hat in each panel
+##  title is the same split-free version as convergence(), after burn-in.
+##
+##      fit <- readRDS(run_dir("2026-10-07_v1", "fits", "infer_baseline_rep05_fit.rds"))
+##      traceplot_fit(fit)                                   # the key parameters
+##      traceplot_fit(fit, pars = sprintf("theta[%d]", 2:10))
+##      traceplot_fit(fit, file = run_dir("2026-10-07_v1", "figures", "trace_baseline_rep05.pdf"))
+traceplot_fit <- function(fit, pars = c("sigma_alpha", "sigma_delta", "sigma_b", "mu_b",
+                                        "gamma[1]", "gamma[2]", "gamma[3]",
+                                        "phi[1]", "phi[2]", "phi[3]", "psi[1]", "psi[2]"),
+                          burn_frac = 1/3, max_points = 2000, file = NULL,
+                          width = 10, height = 7) {
+  pars <- intersect(pars, colnames(fit$chains[[1]]))
+  n <- nrow(fit$chains[[1]]); keep <- unique(round(seq(1, n, length.out = min(n, max_points))))
+  burn <- floor(n * burn_frac)
+  r <- convergence_quiet(fit, burn_frac)
+  lab <- setNames(sprintf("%s  (R-hat %.3f)", pars, r[pars]), pars)
+  d <- do.call(rbind, lapply(seq_along(fit$chains), function(k)
+    data.frame(chain = factor(k), iter = rep(keep, length(pars)),
+               par = rep(pars, each = length(keep)),
+               value = as.numeric(fit$chains[[k]][keep, pars, drop = FALSE]))))
+  d$par <- factor(lab[d$par], lab)
+  tv <- c(setNames(fit$truth$phi, sprintf("phi[%d]", seq_along(fit$truth$phi))),
+          setNames(fit$truth$gamma, sprintf("gamma[%d]", seq_along(fit$truth$gamma))),
+          setNames(fit$truth$psi, sprintf("psi[%d]", seq_along(fit$truth$psi))),
+          setNames(fit$truth$theta, sprintf("theta[%d]", seq_along(fit$truth$theta))),
+          setNames(fit$truth$nu, sprintf("nu[%d]", seq_along(fit$truth$nu))),
+          unlist(fit$truth[c("sigma_alpha", "sigma_delta", "sigma_b", "mu_b")]))
+  tr <- if (length(tv)) data.frame(par = factor(lab[intersect(pars, names(tv))], lab),
+                                   value = tv[intersect(pars, names(tv))]) else NULL
+  p <- ggplot(d, aes(iter, value, colour = chain)) +
+    annotate("rect", xmin = -Inf, xmax = burn, ymin = -Inf, ymax = Inf, fill = "grey85", alpha = 0.6) +
+    geom_line(linewidth = 0.25, alpha = 0.8) +
+    facet_wrap(~ par, scales = "free_y") +
+    labs(title = sprintf("%s rep %s (%s): %d chains x %d iterations",
+                         fit$scenario, fit$rep, fit$tier, length(fit$chains), n),
+         subtitle = "shaded: discarded as burn-in; dashed: true value",
+         x = "iteration", y = NULL) +
+    sim_theme()
+  if (!is.null(tr) && nrow(tr)) p <- p + geom_hline(data = tr, aes(yintercept = value),
+                                                    linetype = "dashed", linewidth = 0.4)
+  if (!is.null(file)) ggsave(file, p, width = width, height = height)
+  p
+}
+
+## R-hat for every monitored parameter, without the printout
+convergence_quiet <- function(fit, burn_frac = 1/3) {
+  out <- NULL
+  capture.output(out <- convergence(fit, burn_frac = burn_frac, n_show = 0))
+  out
+}
+
 if (sys.nframe() == 0L) {
   args <- commandArgs(trailingOnly = TRUE)
-  tier     <- if (length(args) >= 1) args[1] else "infer"
-  n_sim    <- if (length(args) >= 2) as.integer(args[2]) else 10L
-  scenario <- if (length(args) >= 3) args[3] else "baseline"
-  run_simulation_study(n_sim = n_sim, scenario = scenario, tier = tier)
-  plot_sim_fits(scenario = scenario, tier = tier)
-  evaluate_scenario(scenario, tier = tier)
+  if (length(args) < 2) stop("usage: Rscript simulated_data/fit_simulated_data.R <run_id> <data_id> [tier] [n_sim] [scenario]")
+  run_id   <- args[1]; data_id <- args[2]
+  tier     <- if (length(args) >= 3) args[3] else "infer"
+  n_sim    <- if (length(args) >= 4) as.integer(args[4]) else 10L
+  scenario <- if (length(args) >= 5) args[5] else "baseline"
+  run_simulation_study(n_sim = n_sim, scenario = scenario, tier = tier, run_id = run_id, data_id = data_id)
+  plot_sim_fits(scenario = scenario, tier = tier, run_id = run_id)
+  evaluate_scenario(scenario, tier = tier, run_id = run_id)
 }
