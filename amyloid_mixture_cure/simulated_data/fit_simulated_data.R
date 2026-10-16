@@ -18,7 +18,7 @@
 
 for (f in sort(list.files("R", full.names = TRUE))) source(f)
 source("simulated_data/simulate_data.R")
-
+source("simulated_data/evaluate_simulation.R")
 ## ---- data -----------------------------------------------------------
 ## Simulated cohorts in the format of data/adni_amyloid.rds, written by
 ## simulate_all() to simulated_data/datasets/. Each file carries the data
@@ -27,36 +27,44 @@ source("simulated_data/simulate_data.R")
 ##
 ##      sim <- load_simulated("baseline", rep = 1)     # $dat, $truth, $latent
 
-## ---- feasible inits --------------------------------------------------
-## build_model() starts x_tilde at the subject's mean scan. For a subject
-## sitting near the top of the grid, the init curve then carries the later
-## visits OFF the grid and the model starts at -Inf. The real cohort never
-## gets that high (max 1.585); a simulated one occasionally does. Start those
-## subjects lower, so that the last visit is still on the grid with room to
-## spare. Like the z inits, this changes where the chain begins, not what it
-## targets.
-repair_inits <- function(spec, dat, bA, S = SETTINGS, room = 0.10) {
+## ---- subjects who start off the grid -------------------------------
+##  At the initial values, a subject's accumulator trajectory can run past the
+##  top of the SUVR grid by their last scan (a high starting level x_tilde
+##  together with a fast speed). The likelihood is then -Inf and the model
+##  cannot be initialised. Those subjects are DROPPED from the fit rather than
+##  having their inits moved, and the drop is recorded in fit$dropped: how
+##  many, what share of the cohort, their ids, and how many of them were true
+##  accumulators. They are removed from `latent` too, so the recovery scores
+##  compare the fitted subjects with their own truth.
+##
+##  room = 0 drops only subjects who are strictly off the grid; room > 0 also
+##  drops those within that fraction of the clock below the top.
+offgrid_at_inits <- function(spec, dat, bA, S = SETTINGS, room = 0) {
   ini <- spec$inits
   r0  <- rate_grid(bA, ini$theta); G0 <- clock_grid(bA, r0, S$thresh)
-  Gb0 <- sa_interp(bA$y, G0, ini$mu_b)
+  Gb0 <- sa_interp(bA$y, G0, ini$mu_b)                   # clock value at the floor
   rb0 <- max(sa_interp(bA$y, r0, ini$mu_b), S$r_min)
   de  <- as.numeric(dat$X %*% ini$psi) + ini$sigma_delta * ini$z
   g0  <- ifelse(ini$x_tilde >= ini$mu_b, sa_interp(bA$y, G0, ini$x_tilde),
                 Gb0 + (ini$x_tilde - ini$mu_b) / rb0)
   last <- dat$age_mat[cbind(seq_len(dat$n_subj), dat$n_obs)]
-  top  <- G0[bA$n] - room * (G0[bA$n] - Gb0)            # keep `room` of the clock free
-  g0_max <- top - exp(de) * (last - dat$a_tilde)
-  fix <- which(g0 > g0_max)
-  ini$x_tilde[fix] <- ifelse(g0_max[fix] >= Gb0,
-                             sa_inv_monotone(bA$y, G0, pmax(g0_max[fix], Gb0)),
-                             ini$mu_b + rb0 * (g0_max[fix] - Gb0))
-  spec$inits <- ini
-  attr(spec, "n_repaired") <- length(fix)
-  spec
+  top  <- G0[bA$n] - room * (G0[bA$n] - Gb0)            # clock value at the top of the grid
+  g0_max <- top - exp(de) * (last - dat$a_tilde)        # highest start that stays on the grid
+  which(g0 > g0_max)
+}
+
+## keep subjects k (in that order) in a dat list and its matching latent list
+subset_subjects <- function(dat, latent, k) {
+  dat <- within(dat, {
+    n_obs <- n_obs[k]; y_mat <- y_mat[k, , drop = FALSE]
+    age_mat <- age_mat[k, , drop = FALSE]; a_tilde <- a_tilde[k]
+    x_init <- x_init[k]; X <- X[k, , drop = FALSE]; ids <- ids[k]
+    n_subj <- length(k) })
+  list(dat = dat, latent = lapply(latent, function(v) v[k]))
 }
 
 ## ---- the sampler ----------------------------------------------------
-##
+##  
 ##  NIMBLE's default samplers will run this model but mix badly, because the
 ##  parameters that fight each other are not the ones that share a name.
 ##  Blocking here is BY ROLE, measured on the posterior:
@@ -151,24 +159,33 @@ fit_simulated_model <- function(scenario = "baseline", rep = 1L,
   dat <- sim$dat; latent <- sim$latent[c("Z", "alpha", "delta", "z", "b", "x_tilde")]
   if (!is.na(cfg$n_sub) && cfg$n_sub < dat$n_subj) {     # subsample SUBJECTS, never visits
     set.seed(7); k <- sort(sample(dat$n_subj, cfg$n_sub))
-    dat <- within(dat, {
-      n_obs <- n_obs[k]; y_mat <- y_mat[k, , drop = FALSE]
-      age_mat <- age_mat[k, , drop = FALSE]; a_tilde <- a_tilde[k]
-      x_init <- x_init[k]; X <- X[k, , drop = FALSE]; ids <- ids[k]
-      n_subj <- length(k) })
-    latent <- lapply(latent, function(v) v[k])
+    sub <- subset_subjects(dat, latent, k); dat <- sub$dat; latent <- sub$latent
   }
   bA <- make_rate_basis()
   vA <- true_var_basis()
   say("%s rep %d, tier %s: %d subjects, %d scans, %d chains x %d iterations\n",
       scenario, rep, tier, dat$n_subj, sum(dat$n_obs), n_chains, cfg$n_iter)
   
-  spec <- repair_inits(build_model(dat, bA, vA), dat, bA)
+  spec <- build_model(dat, bA, vA)
+  drop <- offgrid_at_inits(spec, dat, bA)                         # strictly off the grid
+  near <- setdiff(offgrid_at_inits(spec, dat, bA, room = 0.10), drop) # on it, but within 10% of the top
+  dropped <- list(n = length(drop), n_total = dat$n_subj, share = length(drop) / dat$n_subj,
+                  ids = dat$ids[drop], n_true_accumulators = sum(latent$Z[drop]),
+                  n_near_top = length(near), ids_near_top = dat$ids[near])
+  if (length(drop)) {
+    sub <- subset_subjects(dat, latent, setdiff(seq_len(dat$n_subj), drop))
+    dat <- sub$dat; latent <- sub$latent
+    spec <- build_model(dat, bA, vA)
+    stopifnot("subjects still off the grid after dropping" =
+                length(offgrid_at_inits(spec, dat, bA)) == 0)
+  }
+  say("dropped %d of %d subjects (%.1f%%) off the grid at the inits (%d true accumulators); fitting %d\n",
+      dropped$n, dropped$n_total, 100 * dropped$share, dropped$n_true_accumulators, dat$n_subj)
+  say("flagged, kept: %d subjects start within 10%% of the top of the grid\n", dropped$n_near_top)
   m <- nimbleModel(spec$code, spec$constants, spec$data, spec$inits,
                    calculate = FALSE, check = FALSE)
   lp <- m$calculate()
-  say("logProb at inits: %.2f (finite: %s; %d x_tilde inits lowered)\n",
-      lp, is.finite(lp), attr(spec, "n_repaired"))
+  say("logProb at inits: %.2f (finite: %s)\n", lp, is.finite(lp))
   if (!is.finite(lp)) {
     nl  <- m$getLogProb(m$getNodeNames(stochOnly = TRUE))
     bad <- m$getNodeNames(stochOnly = TRUE)[!is.finite(nl)]
@@ -220,7 +237,7 @@ fit_simulated_model <- function(scenario = "baseline", rep = 1L,
     }
   }
   fit <- list(tier = tier, scenario = scenario, rep = rep, chains = chains, subj = subj,
-              dat = dat, truth = sim$truth, latent = latent, data_seed = sim$seed,
+              dat = dat, truth = sim$truth, latent = latent, dropped = dropped, data_seed = sim$seed,
               bA = bA, vA = vA, settings = SETTINGS, minutes = el())
   fit_file <- file.path(out_dir, sprintf("%s_fit.rds", tag))
   saveRDS(fit, fit_file)
@@ -311,6 +328,28 @@ recovery_summary <- function(scenario = "baseline", tier = "infer",
   invisible(list(summary = tab, by_sim = by_sim))
 }
 
+## ---- subjects dropped off the grid, across fits -----------------------
+##  One row per fit: how many subjects were dropped at the inits, out of how
+##  many, how many of them were true accumulators, and how many were kept
+##  but flagged for starting within 10% of the top of the grid. Fits made before
+##  subjects were dropped (when inits were repaired instead) show NA.
+dropped_summary <- function(scenario = "baseline", tier = "infer",
+                            out_dir = "simulated_data/results", write = TRUE) {
+  d <- do.call(rbind, lapply(fit_files(scenario, tier, out_dir), function(f) {
+    fit <- readRDS(f); dr <- fit$dropped
+    if (is.null(dr)) dr <- list(n = NA, n_total = NA, n_true_accumulators = NA, n_near_top = NA)
+    data.frame(scenario = scenario, rep = fit$rep, n_dropped = dr$n, n_subjects = dr$n_total,
+               pct_dropped = 100 * dr$n / dr$n_total, n_true_accumulators = dr$n_true_accumulators,
+               n_near_top_kept = dr$n_near_top)
+  }))
+  if (write) write.csv(d, file.path(out_dir, sprintf("dropped_%s_%s.csv", tier, scenario)), row.names = FALSE)
+  cat(sprintf("\n%s / %s: subjects dropped off the grid at the inits, %s total over %d fits (mean %.2f%% per fit); %s more kept but flagged near the top\n",
+              scenario, tier, format(sum(d$n_dropped)), nrow(d), mean(d$pct_dropped),
+              format(sum(d$n_near_top_kept))))
+  print(d, row.names = FALSE)
+  invisible(d)
+}
+
 ## ---- the fitted figures ----------------------------------------------
 ##  The report figures, drawn from the fits to SIMULATED data, in ONE pdf:
 ##   * page 1: the rate curve across replicates, where the simulation adds
@@ -331,10 +370,9 @@ plot_sim_fits <- function(scenario = "baseline", tier = "infer", n_draw = 60,
     fit <- readRDS(f); rp <- sprintf("rep%02d", fit$rep)
     cat(sprintf("\n%s: %d of %d subjects are true accumulators\n", rp, sum(fit$latent$Z), fit$dat$n_subj))
     sq <- subject_quantities(fit, n_draw = n_draw)
-    ttl <- sprintf("%s, replicate %d", scenario, fit$rep)
     pg  <- file.path(tmp, sprintf("%s_%s.pdf", rp, c("aligned", "fit_check")))
-    fig_aligned(fit, sq, pg[1], title = ttl)
-    fig_fit_check(fit, sq, pg[2], title = ttl)
+    fig_aligned(fit, sq, pg[1])
+    fig_fit_check(fit, sq, pg[2])
     pages <- c(pages, pg)
     R  <- exp(fit$bA$B %*% t(pool_draws(fit)[, sprintf("theta[%d]", 1:fit$bA$K)]))
     qd <- quantile(dat_long(fit$dat)$y, c(.02, .98))
@@ -375,7 +413,7 @@ plot_sim_fits <- function(scenario = "baseline", tier = "infer", n_draw = 60,
 ##  PARALLEL, one R process per replicate (NIMBLE compiles into the process's
 ##  own temp directory, so separate processes cannot collide). A replicate
 ##  whose fit is already on disk is skipped, so an interrupted study resumes.
-run_simulation_study <- function(n_sim = 5L, scenario = "baseline",
+run_simulation_study <- function(n_sim = 10L, scenario = "baseline",
                                  tier = c("infer", "struct", "smoke"), n_chains = 3L,
                                  n_iter = NULL, cores = min(n_sim, parallel::detectCores() - 2L),
                                  out_dir = "simulated_data/results") {
@@ -396,6 +434,7 @@ run_simulation_study <- function(n_sim = 5L, scenario = "baseline",
                           out_dir = out_dir, verbose = FALSE); r
     }, scenario, tier, n_chains, n_iter, out_dir)
   }
+  dropped_summary(scenario, tier, out_dir)
   recovery_summary(scenario, tier, out_dir)
 }
 
@@ -445,8 +484,9 @@ convergence <- function(fit, burn_frac = 1/3, n_show = 8) {
 if (sys.nframe() == 0L) {
   args <- commandArgs(trailingOnly = TRUE)
   tier     <- if (length(args) >= 1) args[1] else "infer"
-  n_sim    <- if (length(args) >= 2) as.integer(args[2]) else 5L
+  n_sim    <- if (length(args) >= 2) as.integer(args[2]) else 10L
   scenario <- if (length(args) >= 3) args[3] else "baseline"
   run_simulation_study(n_sim = n_sim, scenario = scenario, tier = tier)
   plot_sim_fits(scenario = scenario, tier = tier)
+  evaluate_scenario(scenario, tier = tier)
 }

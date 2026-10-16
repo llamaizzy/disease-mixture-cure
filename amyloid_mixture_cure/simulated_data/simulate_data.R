@@ -109,7 +109,7 @@ rtnorm <- function(n, mean, sd, lo = -Inf, hi = Inf) {
   qnorm(u, mean, sd)
 }
 
-get_design <- function(N = 1101, p_apoe4 = 0.407, p_female = 0.489,
+get_design <- function(N = 1101, p_apoe4 = 0.407, p_female = 0.489, # maybe change p = 0.5 for both covariates
                        x_centre = c(apoe4 = 0.427, female = 0.503),
                        age_mean = 72.5, age_sd = 7.4, age_range = c(51, 94),
                        apoe4_age_shift = -1.7,
