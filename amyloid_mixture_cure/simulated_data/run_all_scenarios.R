@@ -20,8 +20,9 @@
 RUN_ID  <- "2026-10-16_crn-20reps"   # "<date>_<what changed>"; a new name for every change
 DATA_ID <- "crn-v1"                  # common random numbers across scenarios (new); "v1" is the old data
 NOTES   <- "common seeds across scenarios, 20 replicates, model as in 2026-10-07_v1"
-SCENARIOS <- c("baseline", "sample_size_half", "onset_spread_lo", "onset_spread_hi",
-               "speed_spread_lo", "speed_spread_hi", "meas_error_lo", "meas_error_hi")
+SCENARIOS <- "baseline"
+# SCENARIOS <- c("baseline", "sample_size_half", "onset_spread_lo", "onset_spread_hi",
+#               "speed_spread_lo", "speed_spread_hi", "meas_error_lo", "meas_error_hi")
 N_SIM <- 20L
 TIER  <- "infer"
 

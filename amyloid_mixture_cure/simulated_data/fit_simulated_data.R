@@ -436,8 +436,9 @@ run_simulation_study <- function(n_sim = 10L, scenario = "baseline",
                                  n_iter = NULL, cores = min(n_sim, parallel::detectCores() - 2L),
                                  seed = 100L, run_id, data_id = NULL, notes = "") {
   tier <- match.arg(tier)
-  data_id <- init_run(run_id, data_id, notes)
+  if (is.null(data_id)) data_id <- run_data_id(run_id)       # an existing run knows its data
   simulate_all(n_rep = n_sim, which = scenario, data_id = data_id, verbose = FALSE)
+  data_id <- init_run(run_id, data_id, notes)
   n_it <- if (is.null(n_iter)) TIER_CFG[[tier]]$n_iter else as.integer(n_iter)
   files <- run_dir(run_id, "fits", sprintf("%s_%s_rep%02d_fit.rds", tier, scenario, seq_len(n_sim)))
   done <- file.exists(files)
