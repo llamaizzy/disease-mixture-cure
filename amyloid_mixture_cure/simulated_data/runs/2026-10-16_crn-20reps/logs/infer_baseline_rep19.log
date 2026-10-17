@@ -1,0 +1,39 @@
+baseline rep 19, tier infer: 1101 subjects, 3420 scans, 3 chains x 10000 iterations
+dropped 0 of 1101 subjects (0.0%) off the grid at the inits (0 true accumulators); fitting 1101
+flagged, kept: 3 subjects start within 10% of the top of the grid
+logProb at inits: 4976.72 (finite: TRUE)
+compiled (1.7 min)
+  chain 1 start logProb 4976.72
+  chain 1: 1000/10000  (4.4 min)
+  chain 1: 2000/10000  (6.9 min)
+  chain 1: 3000/10000  (9.4 min)
+  chain 1: 4000/10000  (11.9 min)
+  chain 1: 5000/10000  (14.4 min)
+  chain 1: 6000/10000  (16.9 min)
+  chain 1: 7000/10000  (19.4 min)
+  chain 1: 8000/10000  (21.9 min)
+  chain 1: 9000/10000  (24.4 min)
+  chain 1: 10000/10000  (26.9 min)
+  chain 2 start logProb 4763.40
+  chain 2: 1000/10000  (29.6 min)
+  chain 2: 2000/10000  (32.2 min)
+  chain 2: 3000/10000  (34.7 min)
+  chain 2: 4000/10000  (37.2 min)
+  chain 2: 5000/10000  (39.7 min)
+  chain 2: 6000/10000  (42.2 min)
+  chain 2: 7000/10000  (44.7 min)
+  chain 2: 8000/10000  (47.3 min)
+  chain 2: 9000/10000  (49.8 min)
+  chain 2: 10000/10000  (52.3 min)
+  chain 3 start logProb 4973.43
+  chain 3: 1000/10000  (55.0 min)
+  chain 3: 2000/10000  (57.5 min)
+  chain 3: 3000/10000  (60.0 min)
+  chain 3: 4000/10000  (62.5 min)
+  chain 3: 5000/10000  (65.0 min)
+  chain 3: 6000/10000  (67.5 min)
+  chain 3: 7000/10000  (70.1 min)
+  chain 3: 8000/10000  (72.6 min)
+  chain 3: 9000/10000  (75.2 min)
+  chain 3: 10000/10000  (77.7 min)
+done in 77.8 min -> simulated_data/runs/2026-10-16_crn-20reps/fits/infer_baseline_rep19_fit.rds
