@@ -1,0 +1,535 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, urlcolor=blue!50!black}
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily\small, columns=fullflexible, keepspaces=true,
+  breaklines=true, frame=single, framerule=0.3pt, xleftmargin=4pt, xrightmargin=4pt}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\rbar}{\bar r}
+\newcommand{\expit}{\operatorname{expit}}
+\newcommand{\E}{\mathcal{E}}
+\DeclareMathOperator{\logsumexp}{logsumexp}
+\setlength{\parskip}{4pt}
+
+\title{The joint amyloid--tau extension:\\ what was added to the code, and what each piece computes}
+\author{Implementation note for \texttt{amyloid\_mixture\_cure}}
+\date{October 21, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This note documents, item by item, the code added to the amyloid mixture-cure ODE
+package to implement the joint amyloid--tau model proposed in
+\code{docs/context/coupling\_and\_copula.pdf}: three lifetime susceptibility
+states, a Gaussian copula on the two departure ages, and a tau progression rate
+multiplied by the subject's current amyloid burden. For every new function,
+model node, setting, data field and test, it states the mathematical object
+being computed, the argument conventions, and any deviation from the proposal.
+The amyloid-only model (\code{R/00}--\code{R/05}, \code{run\_model.R}) is not
+modified; the extension is additive. Nothing here reports a fit: the joint model
+has been compiled and smoke-run only.
+\end{abstract}
+
+\tableofcontents
+
+\section{Inventory of changes}
+
+\begin{longtable}{@{}p{0.34\linewidth}p{0.62\linewidth}@{}}
+\toprule
+File & Change \\
+\midrule
+\endhead
+\code{data/raw/dta\_amy.csv}, \code{dta\_tau.csv} & Source CSVs copied into the project. \\
+\code{data/build\_joint\_dataset.R} & \textbf{New.} Builds \code{data/adni\_joint.rds} (\S\ref{sec:data}). \\
+\code{data/adni\_joint.rds} & \textbf{New.} The dataset the models now load. \\
+\code{run\_model.R} & \code{load\_amyloid\_data()} defaults to the joint file; new helper \code{subset\_subjects()}. \\
+\code{simulation/sim\_generate.R} & Uses \code{subset\_subjects()} in place of hand-written subsetting. \\
+\code{R/00\_settings.R} & \textbf{Added} \code{SETTINGS\_TAU} and \code{SETTINGS\_JOINT} (\S\ref{sec:settings}). \\
+\code{R/06\_joint\_densities.R} & \textbf{New.} All joint-model \code{nimbleFunction}s and the two custom distributions (\S\ref{sec:densities}). \\
+\code{R/07\_joint\_model.R} & \textbf{New.} \code{build\_joint\_model()}: the NIMBLE model, constants, data, initial values (\S\ref{sec:model}). \\
+\code{run\_joint\_model.R} & \textbf{New.} \code{configure\_joint\_samplers()}, \code{fit\_joint\_model()}, \code{joint\_state\_probs()}, \code{joint\_paths()} (\S\ref{sec:runner}). \\
+\code{run\_joint\_60k.R} & \textbf{New.} Paste-in script for a 3-chain, 60{,}000-iteration fit. \\
+\code{tests/test\_joint.R} & \textbf{New.} 24 deterministic checks (\S\ref{sec:tests}). \\
+\code{tests/test\_package.R} & Four checks added for the joint data file and \code{subset\_subjects()}. \\
+\code{README.md} & File table updated; new section 10 on the joint model. \\
+\code{docs/context/*.pdf} & The three proposal notes and the paper draft, for reference. \\
+\bottomrule
+\end{longtable}
+
+\section{Notation}
+
+Subjects $i=1,\dots,N$ ($N=1101$); biomarkers $k\in\{A,T\}$; scans
+$j=1,\dots,n_{ki}$ at calendar ages $a_{kij}$ with values $y_{kij}$ (SUVR).
+Throughout, ``level'' means a biomarker value and ``age'' means calendar age in
+years. Quantities inherited from the amyloid model keep their names:
+$\mu_{bk}$ (launch level and non-accumulator mean), $c_k$ (positivity threshold),
+$r_k(y)=\exp\{B_k(y)^\top\theta_k\}$ (rate curve), $\rbar_k=\max(r_k,r_{\min})$,
+$\omega_k(y)=\exp\{V_k(y)^\top\nu_k\}$ (measurement scale), and the clock
+\begin{equation}
+G_k(y)=\int_{c_k}^{y}\frac{dv}{\rbar_k(v)},\qquad
+G_{k,\mathrm{ext}}(x)=\begin{cases}G_k(x), & x\ge\mu_{bk},\\
+G_k(\mu_{bk})+(x-\mu_{bk})/\rbar_k(\mu_{bk}), & x<\mu_{bk}.\end{cases}
+\label{eq:clock}
+\end{equation}
+Each subject carries location coordinates $\tilde x_{ki}$ at reference ages
+$\tilde a_{ki}$, non-centred speeds $z_{ki}$ with $\delta_{ki}=u_i^\top\psi_k+\sigma_{\delta k}z_{ki}$,
+and flat levels $b_{ki}$. The departure age $\alpha_{ki}$ is a deterministic
+function of these (\S\ref{sec:tau-map}).
+
+\section{The data file}\label{sec:data}
+
+\code{data/build\_joint\_dataset.R} reads the two source CSVs and writes
+\code{data/adni\_joint.rds}, a list that is a strict superset of the original
+\code{adni\_amyloid.rds}. The amyloid fields are rebuilt from \code{dta\_amy.csv}
+and asserted equal to the original file to $10^{-10}$ (the test suite repeats this
+assertion). The cohort is the 1{,}101 subjects with at least two amyloid scans, in
+the original row order. Tau scans are joined on the ADNI \code{RID}; the column
+\code{RID\_num} is numbered separately in each CSV and must not be used as a key.
+
+\begin{center}
+\begin{tabular}{@{}llp{0.55\linewidth}@{}}
+\toprule
+Field & Dimension & Definition \\
+\midrule
+\code{n\_obs\_tau} & $N$ & $n_{Ti}$; zero for the 453 subjects without tau scans \\
+\code{y\_tau\_mat} & $N\times 7$ & $y_{Tij}$, zero-padded like \code{y\_mat} \\
+\code{age\_tau\_mat} & $N\times 7$ & $a_{Tij}$, zero-padded \\
+\code{a\_tilde\_tau} & $N$ & $\tilde a_{Ti}$ = mean tau scan age; for subjects without tau, the amyloid centroid $\tilde a_{Ai}$ (the proposal's ``fixed reference age'') \\
+\code{x\_init\_tau} & $N$ & mean tau level, a starting value for $\tilde x_{Ti}$; the cohort median for subjects without tau \\
+\code{has\_tau} & $N$ & logical \\
+\code{n\_subj\_tau} & 1 & 648 \\
+\code{rid} & $N$ & ADNI RID \\
+\code{centiloid} & 2 & intercept and slope of SUVR $= a + b\,$CL; $c_A$ is this map at 24 CL \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Covariate centring is unchanged: APOE4 and sex indicators are centred over all
+1{,}900 amyloid subjects in the source file, not over the cohort, so the shipped
+amyloid posterior's intercepts remain on the same scale. Totals: 3{,}393 amyloid
+scans, 1{,}452 tau scans on 648 subjects. No tau positivity threshold is stored in
+the data; it is a setting (\S\ref{sec:settings}).
+
+\code{subset\_subjects(dat, k)} (in \code{run\_model.R}) cuts \emph{every}
+per-subject field (any vector of length $N$ or matrix with $N$ rows) to the rows
+\code{k}, so a subsample stays self-consistent across amyloid and tau fields.
+
+\section{Settings}\label{sec:settings}
+
+\code{SETTINGS\_TAU} is \code{SETTINGS} with the entries below overridden, so
+\code{make\_rate\_basis(SETTINGS\_TAU)} and \code{make\_var\_basis(y, SETTINGS\_TAU)}
+build tau bases with the existing basis code. \code{SETTINGS\_JOINT} holds what is
+shared. Tau is the NEO-T composite (volume-weighted flortaucipir SUVR of
+bilateral inferior and middle temporal gyri; Ossenkoppele et al.\ 2022, Nat Med),
+inferior cerebellar reference, no partial-volume correction. The tau entries are
+calibrated from the literature on that measurement, not from these data: Jack et
+al.\ 2020 (JAMA Neurol; amyloid-negative inferior temporal SUVR $1.18$, SD $0.08$;
+rates $0.005$/yr below and $0.03$/yr above 68 CL), Ossenkoppele et al.\ 2022
+(positivity = mean $+2$ SD of amyloid-negatives; 14.5\% of A+ unimpaired NEO-T+),
+Ossenkoppele et al.\ 2025 (Nat Neurosci; GMM cut-off 1.40), Devous et al.\ 2018
+and Timmers et al.\ 2020 (test--retest 2--4\%). Only \code{d\_coup} is marked P
+(a modelling choice).
+
+\begin{center}
+\begin{tabular}{@{}llp{0.6\linewidth}@{}}
+\toprule
+Setting & Value & Role \\
+\midrule
+\code{grid\_lo}, \code{grid\_hi}, \code{grid\_step} & 0.70, 4.50, 0.002 & tau level grid (1{,}901 points); observed NEO-T range is 0.92--4.01 \\
+\code{thresh} ($c_T$) & 1.34 & $1.18+2\times0.08$; anchors $G_T$ and truncates $b_{Ti}$, $\mu_{bT}$ \\
+\code{theta1}, \code{theta1\_sd} & $-5.3$, 2.0 & prior mean/sd of $\theta_{T1}$: $e^{-5.3}=0.005$ SUVR/yr, the slow regime \\
+\code{init\_rise} & 6 & initial rate curve rises $0.005\to0.03$/yr from floor to threshold (amyloid: 20) \\
+\code{nu1\_mean} & $-3.5$ & $\log\omega_T$ at the low end; $e^{-3.5}=0.030$ SUVR, i.e.\ SD 0.043 per scan \\
+\code{mu\_b\_mean}, \code{mu\_b\_sd} & 1.17, 0.05 & prior on $\mu_{bT}$, truncated to $(\code{grid\_lo}, c_T)$ \\
+\code{sigma\_b\_sd}, \code{sigma\_b\_max} & 0.10, 0.30 & half-normal scale and cap for $\sigma_{bT}$ (latent spread $\approx0.07$) \\
+\code{phi1\_mean}, \code{phi1\_sd} & 0.5, 1 & conditional tau susceptibility intercept: $q=0.62$, 95\% range 0.18--0.93 \\
+\code{g1\_age} & 75 & centre of the tau AFT intercept, $\gamma_{T1}\sim N(\log(75-25),0.75^2)$ (amyloid: 70) \\
+\midrule
+\code{d\_coup} & 0.10 (P) & sigmoid width of $H_A$, in amyloid SUVR \\
+\code{beta\_sd} & 1.0 & $\beta\sim N(0,1)$ truncated to $\beta\ge 0$ \\
+\code{rho\_beta} & (2, 2) & $(\rho+1)/2\sim\mathrm{Beta}(2,2)$ \\
+\code{subj\_block} & \code{"four"} & per-subject sampler blocking (\S\ref{sec:samplers}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Everything not listed (age bounds 25--125, $r_{\min}$, $t$ degrees of freedom 4,
+random-walk truncations, $z$ bound 4, AFT intercept prior centred at age 70)
+is inherited from \code{SETTINGS} for both biomarkers.
+
+\section{The coupling and the exposure clock}\label{sec:exposure}
+
+\subsection{The multiplier}
+
+The proposal couples tau to amyloid through a rate multiplier
+\begin{equation}
+m(y)=\exp\{s(y)\},\qquad s(y)=\beta\,[H_A(y)-H_A(c_A)],\qquad
+H_A(y)=\expit\!\left(\frac{y-c_A}{d}\right),
+\label{eq:m}
+\end{equation}
+with $d=\code{d\_coup}$. Since $H_A(c_A)=\tfrac12$, $m(c_A)=1$ and
+$m\in(e^{-\beta/2},e^{\beta/2})$. Implemented as \code{nfCouple(y, beta, cA, d)}.
+The tau ODE for an accumulator is
+\begin{equation}
+\frac{dT_i}{da}=e^{\delta_{Ti}}\,m\!\big(A_i(a)\big)\,\rbar_T\!\big(T_i(a)\big),\qquad T_i(\alpha_{Ti})=\mu_{bT},
+\label{eq:tauode}
+\end{equation}
+where $A_i(a)$ is the subject's \emph{candidate accumulator} amyloid path
+(flat at $\mu_{bA}$ before $\alpha_{Ai}$, then on the amyloid clock). Dividing by
+$\rbar_T$ and integrating gives
+\begin{equation}
+G_T\!\big(T_i(a)\big)=G_T(\mu_{bT})+e^{\delta_{Ti}}\int_{\alpha_{Ti}}^{a} m\!\big(A_i(u)\big)\,du .
+\label{eq:tausol}
+\end{equation}
+
+\subsection{The exposure clock: the one deviation from the proposal}
+
+The proposal evaluates the integral in \eqref{eq:tausol} by per-subject age
+quadrature. The implementation does not. Define the exposure accumulated since
+\emph{amyloid} departure,
+\[
+\Psi_i(u)=\int_{\alpha_{Ai}}^{u} m\!\big(A_i(v)\big)\,dv ,
+\]
+and note that $A_i$ is constant ($=\mu_{bA}$) before $\alpha_{Ai}$ and, after it,
+satisfies $dA_i=e^{\delta_{Ai}}\rbar_A(A_i)\,dv$, so $dv=e^{-\delta_{Ai}}dA_i/\rbar_A(A_i)$.
+Hence
+\begin{equation}
+\Psi_i(u)=\begin{cases}
+m(\mu_{bA})\,(u-\alpha_{Ai}), & u\le\alpha_{Ai},\\[3pt]
+e^{-\delta_{Ai}}\big[\E(A_i(u))-\E(\mu_{bA})\big], & u>\alpha_{Ai},
+\end{cases}
+\qquad
+\E(y)=\int_{\ell_A}^{y}\frac{m(v)}{\rbar_A(v)}\,dv .
+\label{eq:psi}
+\end{equation}
+$\E$ is a \emph{population} table on the amyloid level grid: it depends on
+$\theta_A$ and $\beta$ only, and is tabulated once per iteration by the
+cumulative trapezoid rule, exactly as $G_A$ is. The lower limit $\ell_A$ is the
+grid bottom; only differences of $\E$ ever appear. A subject's exposure between
+two ages is then two lookups, and its inverse is a monotone table inverse of
+$\E$ followed by the amyloid clock:
+\begin{equation}
+\Psi_i^{-1}(\psi)=\begin{cases}
+\alpha_{Ai}+\psi/m(\mu_{bA}), & \psi\le0,\\[3pt]
+\alpha_{Ai}+e^{-\delta_{Ai}}\big[G_A(y^\ast)-G_A(\mu_{bA})\big],\quad
+y^\ast=\E^{-1}\!\big(\E(\mu_{bA})+e^{\delta_{Ai}}\psi\big), & \psi>0 .
+\end{cases}
+\label{eq:psiinv}
+\end{equation}
+The proposal's $C_i(a)=\int_{\tilde a_{Ti}}^{a}m_i(u)\,du$ is
+$\Psi_i(a)-\Psi_i(\tilde a_{Ti})$, and
+\eqref{eq:tausol} becomes $G_T(T_i(a))=G_T(\mu_{bT})+e^{\delta_{Ti}}[\Psi_i(a)-\Psi_i(\alpha_{Ti})]$.
+At $\beta=0$, $m\equiv1$, $\E=G_A+\text{const}$, and both cases of \eqref{eq:psi}
+reduce to $\Psi_i(u)=u-\alpha_{Ai}$: the uncoupled model is recovered exactly, which
+the tests verify to $5\times10^{-13}$.
+
+\paragraph{Functions.}
+\begin{itemize}[nosep]
+\item \code{nfExpClock(r, step, n, lo, r\_min, beta, cA, d)}: returns $\E$ on the grid.
+\item \code{nfAmyState(xA, deltaA, atilA, mu\_bA, G, rgrid, lo, step, ngrid, r\_min)}:
+returns $(g_0, G_b, \alpha_{Ai})$ with $g_0=G_{A,\mathrm{ext}}(\tilde x_{Ai})$,
+$G_b=G_A(\mu_{bA})$, $\alpha_{Ai}=\tilde a_{Ai}-e^{-\delta_{Ai}}(g_0-G_b)$; returns
+$\alpha_{Ai}=-\infty$ if $\tilde x_{Ai}$ is above the table.
+\item \code{nfExposure(u, g0, Gb, alphaA, deltaA, atilA, mu\_bA, G, E, lo, step, ngrid, beta, cA, d)}:
+$\Psi_i(u)$ by \eqref{eq:psi}; \code{NaN} if $A_i(u)$ is off the table.
+\item \code{nfInvExposure(psi, g0, Gb, alphaA, deltaA, mu\_bA, G, E, lo, step, ngrid, beta, cA, d)}:
+returns $(\Psi_i^{-1}(\psi),\,A_i(\Psi_i^{-1}(\psi)))$ by \eqref{eq:psiinv}, the
+second component so the caller gets $m_i$ at that age without another lookup.
+\end{itemize}
+
+\section{The tau location coordinate and its density}\label{sec:tau-map}
+
+\subsection{The map from location to departure age}
+
+For amyloid, the existing map is $\alpha_{Ai}=\tilde a_{Ai}-e^{-\delta_{Ai}}\Delta G_{Ai}$,
+$\Delta G_{Ai}=G_{A,\mathrm{ext}}(\tilde x_{Ai})-G_A(\mu_{bA})$, with Jacobian
+$J_{Ai}=e^{-\delta_{Ai}}/\rbar_A(\cdot)$ (evaluated at $\tilde x_{Ai}$ above the
+floor, at $\mu_{bA}$ below it). This is \code{dxtilde} and is unchanged.
+
+For tau, setting $a=\tilde a_{Ti}$ in the solution and using $G_{T,\mathrm{ext}}(\tilde x_{Ti})=G_T(T_i(\tilde a_{Ti}))$,
+\begin{equation}
+\Psi_i(\alpha_{Ti})=\Psi_i(\tilde a_{Ti})-e^{-\delta_{Ti}}\Delta G_{Ti},\qquad
+\Delta G_{Ti}=G_{T,\mathrm{ext}}(\tilde x_{Ti})-G_T(\mu_{bT}),
+\label{eq:taumap}
+\end{equation}
+so $\alpha_{Ti}=\Psi_i^{-1}\big(\Psi_i(\tilde a_{Ti})-e^{-\delta_{Ti}}\Delta G_{Ti}\big)$.
+Differentiating \eqref{eq:taumap} in $\tilde x_{Ti}$ with the amyloid path and both
+speeds fixed, $m(A_i(\alpha_{Ti}))\,\partial\alpha_{Ti}/\partial\tilde x_{Ti}=-e^{-\delta_{Ti}}D_T(\tilde x_{Ti})$, giving
+\begin{equation}
+J_{Ti}=\frac{e^{-\delta_{Ti}}\,D_T(\tilde x_{Ti})}{m\big(A_i(\alpha_{Ti})\big)},\qquad
+D_T(x)=\begin{cases}1/\rbar_T(x), & x\ge\mu_{bT},\\ 1/\rbar_T(\mu_{bT}), & x<\mu_{bT}.\end{cases}
+\label{eq:jac}
+\end{equation}
+The factor $1/m(A_i(\alpha_{Ti}))$ is the ``required change'' of the proposal's
+\S7. The transformation $(\tilde x_{Ai},\tilde x_{Ti})\mapsto(\alpha_{Ai},\alpha_{Ti})$
+is triangular ($\alpha_{Ai}$ does not depend on $\tilde x_{Ti}$), so the determinant
+is $J_{Ai}J_{Ti}$ and the cross-derivative, though nonzero, does not enter.
+As in \code{dxtilde}, $D$ uses the interpolated $1/\rbar$ at the point rather
+than the slope of the piecewise-linear clock table; the two differ at the level of
+the trapezoid discretisation.
+
+\subsection{Departure-age marginals and the copula}
+
+Both departure ages have the existing shifted, upper-truncated Weibull AFT
+marginal with $\kappa_k=1/\sigma_{\alpha k}$, $\lambda_{ki}=\exp(x_i^\top\gamma_k)$,
+support $(a_{\min},a_{\max}]=(25,125]$:
+\[
+f_{ki}(a)=\frac{\kappa_k}{\lambda_{ki}C_{ki}}\Big(\tfrac{a-a_{\min}}{\lambda_{ki}}\Big)^{\kappa_k-1}
+\exp\Big[-\Big(\tfrac{a-a_{\min}}{\lambda_{ki}}\Big)^{\kappa_k}\Big],\quad
+F_{ki}(a)=\frac{1-\exp[-((a-a_{\min})/\lambda_{ki})^{\kappa_k}]}{C_{ki}},
+\]
+$C_{ki}=1-\exp[-((a_{\max}-a_{\min})/\lambda_{ki})^{\kappa_k}]$.
+Implemented as \code{nfLogTWeib} (log density) and \code{nfTWeibCDF} (CDF), both
+using \code{nfExpm1} (a cancellation-free $e^x-1$, since \code{expm1} is not in
+the NIMBLE DSL). The joint departure density is
+\[
+f_{\alpha i}(a_A,a_T)=c_\rho\big(F_{Ai}(a_A),F_{Ti}(a_T)\big)\,f_{Ai}(a_A)\,f_{Ti}(a_T),
+\]
+with the Gaussian copula density, $v_k=\Phi^{-1}(p_k)$,
+\[
+\log c_\rho(p_1,p_2)=-\tfrac12\log(1-\rho^2)-\frac{\rho^2(v_1^2+v_2^2)-2\rho v_1v_2}{2(1-\rho^2)},
+\]
+implemented as \code{nfLogCopula(p1, p2, rho)}. There is no speed copula; $z_{Ai}$
+and $z_{Ti}$ are independent truncated standard normals.
+
+\subsection{\code{dxtildeT}: the density of $\tilde x_{Ti}$}
+
+The node $\tilde x_{Ti}\sim\code{dxtildeT}(\cdots)$ has log density
+\begin{equation}
+\log f_{Ti}(\alpha_{Ti})+\log c_\rho\big(F_{Ai}(\alpha_{Ai}),F_{Ti}(\alpha_{Ti})\big)
+-\delta_{Ti}+\log D_T(\tilde x_{Ti})-\log m\big(A_i(\alpha_{Ti})\big),
+\label{eq:dxt}
+\end{equation}
+evaluated in the order: $\Delta G_{Ti}$ and $\log D_T$ from the tau clock;
+$(g_0,G_b,\alpha_{Ai})$ from \code{nfAmyState}; $\Psi_i(\tilde a_{Ti})$ from
+\code{nfExposure}; $(\alpha_{Ti},A_i(\alpha_{Ti}))$ from \code{nfInvExposure};
+then the three terms. It returns $-\infty$ if $\tilde x_{Ti}$ or $\tilde x_{Ai}$ is
+above its table, if either implied age is outside $(a_{\min},a_{\max}]$, if either
+CDF is exactly 0 or 1, or if any amyloid lookup leaves the table. The amyloid
+marginal $f_{Ai}(\alpha_{Ai})J_{Ai}$ is supplied by \code{dxtilde} on
+$\tilde x_{Ai}$, so the copula term appears exactly once in the posterior. No other
+prior is placed on $\tilde x_{Ti}$.
+
+Argument list (all scalars unless noted): tau --- \code{deltaT, atilT, mu\_bT, xgT,
+sigma\_alphaT, aminT, amaxT, GT[], rT[], loT, stepT, ngridT, r\_minT}; amyloid ---
+\code{xA, deltaA, atilA, mu\_bA, xgA, sigma\_alphaA, aminA, amaxA, GA[], rA[], EA[],
+loA, stepA, ngridA, r\_minA}; coupling --- \code{beta, cA, d\_coup, rho}.
+Here \code{xgk}$=x_i^\top\gamma_k$. The simulation function \code{rxtildeT} is a
+stub (NIMBLE requires one; the model never simulates this node).
+
+\section{The three-state subject likelihood: \code{dsubjJoint}}\label{sec:densities}
+
+The data node for subject $i$ is the concatenated vector
+$y_{i\cdot}=(y_{Ai1},\dots,y_{Ai,\max n_A},\,y_{Ti1},\dots,y_{Ti,\max n_T})$,
+zero-padded, with the tau block starting at offset \code{offT}$=\max n_A$.
+Writing $t_4(y;\mu,\omega)$ for the scaled Student-$t$ log density
+(\code{nfLogDT}; $\omega$ is a scale, not an SD), the four branch sums are
+\begin{align*}
+\ell^{0}_{Ai}&=\sum_j t_4\big(y_{Aij};b_{Ai},\omega_A(b_{Ai})\big), &
+\ell^{1}_{Ai}&=\sum_j t_4\big(y_{Aij};A_i(a_{Aij}),\omega_A(A_i(a_{Aij}))\big),\\
+\ell^{0}_{Ti}&=\sum_j t_4\big(y_{Tij};b_{Ti},\omega_T(b_{Ti})\big), &
+\ell^{1}_{Ti}&=\sum_j t_4\big(y_{Tij};T_i(a_{Tij}),\omega_T(T_i(a_{Tij}))\big),
+\end{align*}
+with $A_i(a)=G_A^{-1}\big(\max\{G_b,\;g_0+e^{\delta_{Ai}}(a-\tilde a_{Ai})\}\big)$
+as in \code{dsubjMix}, and
+\begin{equation}
+T_i(a)=G_T^{-1}\Big(\max\big\{G_T(\mu_{bT}),\;G_{T,\mathrm{ext}}(\tilde x_{Ti})+e^{\delta_{Ti}}[\Psi_i(a)-\Psi_i(\tilde a_{Ti})]\big\}\Big),
+\label{eq:Tpath}
+\end{equation}
+which is the proposal's eq.~(21) in exposure-clock form: the inner $\max$ holds
+tau at its floor before tau departure. With $\pi_i=\expit(w_i^\top\phi_A)$ and
+$q_i=\expit(w_i^\top\phi_T)$,
+\begin{equation}
+\log L_i=\logsumexp\Big\{
+\underbrace{\log(1-\pi_i)+\ell^0_{Ai}+\ell^0_{Ti}}_{\ell_{00}},\;
+\underbrace{\log\pi_i+\log(1-q_i)+\ell^1_{Ai}+\ell^0_{Ti}}_{\ell_{10}},\;
+\underbrace{\log\pi_i+\log q_i+\ell^1_{Ai}+\ell^1_{Ti}}_{\ell_{11}}\Big\}.
+\label{eq:lik}
+\end{equation}
+State 11 uses the \emph{same} amyloid accumulator path in $\ell^1_{Ti}$ as in
+$\ell^1_{Ai}$; there is no tau-only state. When $n_{Ti}=0$ the tau sums are zero and
+\eqref{eq:lik} collapses to the amyloid two-branch mixture (verified numerically to
+$10^{-10}$ against \code{dsubjMix}). The function returns $-\infty$ if either
+location is at or above its table top, or if any trajectory lookup leaves a table.
+Argument order: \code{nA, agesA[], nT, agesT[], offT}; the amyloid block
+(\code{xA, atilA, deltaA, bA, logit\_pi, mu\_bA, GA[], rA[], EA[], loA, stepA, ngridA,
+r\_minA, omA[], vloA, vstepA, nvA}); the tau block (same pattern with \code{xT, atilT,
+deltaT, bT, logit\_q, mu\_bT, GT[], rT[], loT, stepT, ngridT, r\_minT, omT[], vloT,
+vstepT, nvT}); then \code{beta, cA, d\_coup, df}.
+
+\section{The model: \code{build\_joint\_model()}}\label{sec:model}
+
+\code{build\_joint\_model(dat, bA, vA, bT, vT, SA, ST, SJ)} returns
+\code{list(code, constants, data, inits)} for \code{nimbleModel}. The amyloid
+population block is copied verbatim from \code{R/04\_model.R}. New nodes:
+
+\paragraph{Amyloid, one addition.}
+\code{E\_grid[1:ngrid] <- nfExpClock(r\_grid, y\_step, ngrid, y\_lo, r\_min, beta, thresh, d\_coup)}.
+
+\paragraph{Tau population.} The same structure as amyloid with suffix \code{\_T}:
+\begin{itemize}[nosep]
+\item Rate curve: $\theta_{T1}\sim N(\code{theta1\_T},\code{theta1\_sd\_T}^2)$ \textbf{free}
+(the amyloid $\theta_1$ is pinned because its basis support lies below the floor;
+the tau basis function 1 has support $[0.70,1.10]$, which overlaps the plausible
+$\mu_{bT}$, so pinning it would be an accidental prior). Then
+$\theta_{Tj}\mid\theta_{T,j-1}\sim N(\theta_{T,j-1},\lambda_{Tj}/\varsigma_T)$, $j=2,\dots,10$,
+with the same truncated $\mathrm{Exp}(1)$ local and $\mathrm{Gamma}(1,1)$ global
+priors (\code{lam\_sp\_th\_T}, \code{sp\_th\_T}). \code{r\_grid\_T}, \code{G\_grid\_T} as for amyloid.
+\item Measurement scale: $\nu_{T1}\sim N(\code{nu1\_mean\_T},1)$, fixed-width random walk
+(sd 0.5), all truncated to $(-9,1)$. \code{omega\_grid\_T}.
+\item Floor: $\mu_{bT}\sim N(1.05,0.10^2)$ truncated to $(\code{y\_lo\_T},c_T)$.
+\item Departure: $\gamma_{T1}\sim N(\log 45,0.75^2)$, $\gamma_{Tq}\sim N(0,0.25^2)$,
+$\sigma_{\alpha T}\sim\mathrm{Gamma}(2,8)$ truncated to $(0,2)$.
+\item Speed: $\psi_{Tq}\sim N(0,0.25^2)$ (no intercept), $\sigma_{\delta T}\sim N^+(0,1)$ truncated at 2.
+\item Conditional susceptibility: $\phi_{T1}\sim N(0,1)$, $\phi_{Tq}\sim N(0,0.5^2)$;
+\code{q\_bar} $=\expit(\phi_{T1})$.
+\item $\sigma_{bT}\sim N^+(0,0.15)$ truncated at 0.5.
+\end{itemize}
+
+\paragraph{Coupling and dependence.}
+$\beta\sim N(0,\code{beta\_sd}^2)$ truncated to $\beta\ge0$;
+$u_\rho\sim\mathrm{Beta}(2,2)$, \code{rho\_alpha} $=2u_\rho-1$.
+
+\paragraph{Per subject.} In addition to the amyloid nodes
+\code{z[i], delta[i], xg[i], lp\_i[i], x\_tilde[i], b[i]}:
+\begin{lstlisting}
+z_T[i]     ~ T(dnorm(0, 1), -z_bound, z_bound)
+delta_T[i] <- inprod(X[i,], psi_T) + sigma_delta_T * z_T[i]
+xg_T[i]    <- inprod(Xg[i,], gamma_T)          # AFT log scale
+lq_i[i]    <- inprod(Xg[i,], phi_T)            # logit q_i
+x_tilde_T[i] ~ dxtildeT(...)                   # eq. (8)
+b_T[i]     ~ T(dnorm(mu_b_T, sigma_b_T), , thresh_T)
+y_joint[i, 1:max_nn] ~ dsubjJoint(...)         # eq. (10)
+\end{lstlisting}
+
+\paragraph{Constants and data.} All amyloid constants as before, plus
+\code{n\_obs\_T, max\_n\_T, max\_nn}$=\max n_A+\max n_T$, \code{age\_mat\_T,
+a\_tilde\_T}, the tau bases (\code{K\_T, ngrid\_T, Bh\_T, y\_lo\_T, y\_step\_T, Kv\_T,
+nvgrid\_T, Bv\_T, v\_lo\_T, v\_step\_T}), tau prior hyperparameters, and
+\code{d\_coup, beta\_sd, rho\_a, rho\_b}. Data: \code{y\_joint = cbind(y\_mat,
+y\_tau\_mat)} and the pinned amyloid $\theta_1$.
+
+\paragraph{Initial values.} Amyloid inits as before. Tau: $\theta_T$ from a
+least-squares fit to a log-rate target that rises by a factor 20 from the grid
+bottom to $c_T$ and then flattens (the same rule as amyloid); $\nu_T$ at
+\code{nu1\_mean\_T}; $\mu_{bT}=\min(1.05,c_T-0.05)$; $\gamma_{T1}=\log 45$;
+$\sigma_{\alpha T}=0.27$; $\sigma_{\delta T}=0.4$; $\phi_T=0$; $\sigma_{bT}=0.08$;
+$\tilde x_{Ti}$ = \code{x\_init\_tau} clipped into the grid; $b_{Ti}=\min(\code{x\_init\_tau},c_T-0.01)$;
+$\beta=0$ and $u_\rho=0.5$ (uncoupled, independent start). Speeds $z_{Ti}$ are set
+by the same feasibility rule as $z_{Ai}$ (minimum speed so that the implied
+departure age exceeds $a_{\min}$), which is exact at $\beta=0$ because the tau map
+is then the plain clock map. \code{feasible\_z()} is the shared helper.
+
+\section{Runner, samplers and post-processing}\label{sec:runner}
+
+\subsection{\code{configure\_joint\_samplers()}}\label{sec:samplers}
+
+Monitors: every population parameter of both biomarkers plus \code{beta,
+rho\_alpha, pi\_bar, q\_bar}; \code{monitors2} (thinned 20$\times$):
+\code{x\_tilde, z, b, x\_tilde\_T, z\_T, b\_T}. Default samplers are removed before
+any replacement is added (the ordering issue documented in \code{run\_model.R}).
+Blocks:
+\begin{itemize}[nosep]
+\item \code{AF\_slice}: \code{nu}; \{\code{gamma[1]}, \code{theta[2:10]}\}; \code{gamma[2:3]}; \code{psi};
+\code{nu\_T}; \{\code{gamma\_T[1]}, \code{theta\_T[1:10]}\}; \code{gamma\_T[2:3]}; \code{psi\_T}; \code{phi\_T}.
+\item \code{slice}: \code{sigma\_delta, sigma\_alpha, mu\_b, sigma\_b} and their
+\code{\_T} twins, \code{beta}, \code{u\_rho}; per subject \code{b[i]}, \code{b\_T[i]}.
+\item Per subject: with \code{subj\_block = "four"} (default), one \code{RW\_block}
+over $(\tilde x_{Ai},z_{Ai},\tilde x_{Ti},z_{Ti})$ for subjects with tau scans and two
+pairs $(\tilde x_{Ai},z_{Ai})$, $(\tilde x_{Ti},z_{Ti})$ otherwise; with \code{"pairs"},
+two pairs for everyone. The four-block exists because an amyloid proposal moves the
+implied tau departure age through the exposure clock.
+\item \code{phi} (amyloid susceptibility) keeps NIMBLE's default, as in the amyloid runner.
+\end{itemize}
+An assertion fails if any node is left without a sampler.
+
+\subsection{\code{fit\_joint\_model(tier, n\_chains, seed, out\_dir, verbose, jitter, n\_iter, chunk)}}
+
+Tiers: \code{smoke} (250 subjects, 300 iterations), \code{struct} (all, 800),
+\code{infer} (all, 20{,}000); \code{n\_iter} and \code{chunk} override. Builds both
+bases per biomarker (\code{make\_var\_basis} on that biomarker's observed scans),
+checks the log posterior at the inits is finite and names offending nodes if not,
+compiles, and runs chains sequentially in chunks, writing
+\code{<tier>\_chains.rds} and \code{<tier>\_subj.rds} after every chunk and
+\code{<tier>\_fit.rds} at the end (a list with \code{chains, subj, dat, bA, vA, bT, vT,
+settings, minutes}). Chains $2,\dots$ start from the inits jittered by
+\code{jitter}$\cdot N(0,1)$ on $\theta,\nu,\psi,\gamma$ and their tau twins and $\phi_T$,
+$0.02\,N(0,1)$ on both floors, $|0.2\,N(0,1)|$ on $\beta$ and $0.1\,N(0,1)$ on $u_\rho$,
+with the jitter scale halved until the state is feasible.
+
+\subsection{\code{joint\_state\_probs(fit, max\_draws)}}
+
+Posterior state probabilities $r_{si}=P(S_i=s\mid\text{data},\text{draw})$, averaged
+over up to \code{max\_draws} saved subject draws. At each draw it rebuilds
+$r_A,G_A,\E,r_T,G_T,\omega_A,\omega_T$ in R from the population draw, recomputes
+the subject's paths with \code{joint\_paths()} (the R twin of \code{nfExposure} and
+\eqref{eq:Tpath}, using \code{sa\_interp}/\code{sa\_inv\_monotone}), evaluates the three
+branches of \eqref{eq:lik} with \code{dt\_log()}, and normalises. Returns an
+$N\times3$ matrix with columns \code{00, 10, 11}; rows sum to one. Biological
+summaries for a state should be weighted by the corresponding column, as the
+proposal's \S8 specifies.
+
+\section{Tests: \code{tests/test\_joint.R}}\label{sec:tests}
+
+Compiles the new functions standalone and checks, with a bent rate curve
+(the inits plus a fixed perturbation) and a hand-built subject:
+\begin{enumerate}[nosep]
+\item \textbf{Uncoupled limit.} $\E-G_A$ constant at $\beta=0$; \code{dxtildeT} at
+$\beta=0,\rho=0$ equals \code{dxtilde} called with tau arguments, at three
+locations; the copula term vanishes at $\rho=0$.
+\item \textbf{Constant-exposure limit.} A subject at 1.30 SUVR at age 70, moving
+slowly, has $H_A>0.996$ over a tau window 72--80: the multiplier is constant to
+1\%, the exposure grows linearly at that rate, and the rate exceeds $e^{0.45\beta}$.
+\item \textbf{Round trips and Jacobian.} $\tilde x_T\to\alpha_T\to\tilde x_T$ at four
+locations (including one below the floor) to $10^{-6}$; the Jacobian read off
+\eqref{eq:dxt} against central finite differences of $\alpha_T(\tilde x_T)$ to 2\%;
+a nonzero amyloid-to-tau cross-derivative.
+\item \textbf{ODE agreement.} \eqref{eq:Tpath} against an RK4 solve of
+\eqref{eq:tauode} with step 0.01 yr at three ages, to $3\times10^{-3}$ SUVR
+(observed agreement: 4 decimals).
+\item \textbf{Normalisation.} Truncated Weibull density integrates to one; its CDF is
+one at $a_{\max}$; the copula density integrates to one over the unit square.
+\item \textbf{Marginalisation.} For a subject with no tau scans, \code{dsubjJoint}
+equals \code{dsubjMix} to $10^{-10}$; state weights sum to one.
+\end{enumerate}
+All 24 pass. \code{tests/test\_package.R} (the amyloid-only suite) passes 26 of 26
+with the new files sourced.
+
+\section{Status, and what is deliberately not done}
+
+\begin{itemize}[nosep]
+\item Compiled and smoke-run on 250 subjects, 2 chains $\times$ 300 iterations:
+compile 0.9 min, about 0.12 s per iteration; all parameters move. On the full cohort
+expect roughly 0.5 s per iteration. No inference is claimed from this run.
+\item \textbf{No tail continuation.} A trajectory that leaves a level table returns
+$-\infty$, as in the amyloid model; the proposal asks for constant extension of
+$\log r$ and $\log\omega$ beyond the grid. The tau grid is wide (0.70--4.50) to make
+this rare for the auxiliary tau coordinates of the 454 subjects without tau scans,
+but it remains a parameter-dependent support restriction.
+\item \textbf{Tau summary.} The model was first run on the mesial temporal
+meta-ROI, for which the three-state restriction $Z_T\le Z_A$ is biologically wrong
+(age-related medial temporal tau without amyloid): that fit forced tau-positive,
+amyloid-flat subjects into the latent-amyloid state and pulled the amyloid
+susceptibility $\bar\pi$ from 0.74 to 0.91. The main dataset is now the NEO-T
+neocortical composite, for which the restriction is defensible, with priors
+recalibrated from the literature (\S\ref{sec:settings}). Only $d_{\mathrm{coup}}$
+remains a provisional choice.
+\item Chains now run in parallel (one process each). Not implemented: a full
+recovery study (single-chain checks at $\beta\in\{0,1.75\}$ exist), model
+comparison (a)--(d), prediction hold-outs, prior sensitivity, a flexible coupling
+spline, and departure ordering.
+\end{itemize}
+
+\end{document}

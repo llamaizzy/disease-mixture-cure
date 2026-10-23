@@ -1,0 +1,4 @@
+results/*.rds
+results/*.log
+results/sim/
+results_joint/*.rds

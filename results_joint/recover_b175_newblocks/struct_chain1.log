@@ -1,0 +1,9 @@
+chain 1: logProb at inits 4821.05 (finite: TRUE)
+chain 1: compiled (4.7 min)
+chain 1: start logProb 4821.05
+chain 1: 500/3000  (24.3 min)
+chain 1: 1000/3000  (29.0 min)
+chain 1: 1500/3000  (33.5 min)
+chain 1: 2000/3000  (38.0 min)
+chain 1: 2500/3000  (42.5 min)
+chain 1: 3000/3000  (47.1 min)
