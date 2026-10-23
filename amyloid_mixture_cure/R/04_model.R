@@ -83,7 +83,7 @@ build_model <- function(dat, bA, vA, S = SETTINGS) {
 
     ## ---- susceptibility (whether at all) -----------------------------
     phi[1] ~ dnorm(phi1_mean, sd = phi1_sd)
-    for (q in 2:pw) phi[q] ~ dnorm(0, sd = 0.5)
+    for (q in 2:pw) phi[q] ~ dnorm(0, sd = 1.5)
     sigma_b ~ T(dnorm(0, sd = 0.15), 0, 0.5)
     pi_bar <- 1 / (1 + exp(-phi[1]))          # susceptibility at covariate means
 

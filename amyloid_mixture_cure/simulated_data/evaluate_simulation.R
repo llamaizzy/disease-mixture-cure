@@ -25,7 +25,7 @@
 ##  Scalar parameter theta (Tables 2-4): NMSE = (1/R) sum_r error_r^2 / theta^2
 ##    CAUTION: dividing by theta^2 only means something for a positive SCALE
 ##    parameter (Tables 2 and 4). It explodes when |theta| is small and depends on an
-##    arbitrary origin for an intercept. The coefficients (Table 3)
+##    arbitrary oriin for an intercept. The coefficients (Table 3)
 ##    are therefore displayed as RMSE in their own units FIRST; their
 ##    NMSE follows, and the long file carries small_truth = TRUE on the rows
 ##    it cannot be read for.
@@ -71,7 +71,7 @@ if (!exists("pool_paired")) for (f in sort(list.files("R", full.names = TRUE))) 
 if (!exists("run_dir")) source("simulated_data/study_paths.R")
 
 EVAL <- list(
-  estimator = "median",            # "mean" or "median" of the posterior
+  estimator = "mean",            # "mean" or "median" of the posterior
   burn_frac = 1/3,               # discarded from the start of EACH chain
   r_range   = c(NA, 1.30),       # SUVR range for the rate curve; NA = the true mu_b
   var_range = c(0.50, 1.30),     # SUVR range for the measurement-error variance
@@ -91,10 +91,10 @@ SCEN <- c(baseline = "baseline", sample_size_half = "n_half",
           speed_spread_lo = "speed_lo", speed_spread_hi = "speed_hi",
           meas_error_lo = "meas_lo", meas_error_hi = "meas_hi")
 
-## The metrics printed for each table (column of the long file = panel title).
-##  bias is in the quantity's own units where the truth is fixed across
-##  scenarios (Tables 1, 3); rel_bias = bias / |truth| where a scenario moves
-##  the truth (Tables 2, 4), so the columns stay comparable.
+## The metrics printed for each table
+## Table 1, 3 use bias
+## Tables 2, 4 use rel_bias = bias / |truth| where a scenario moves
+##  the truth so the columns stay comparable.
 PANELS <- list(
   table1 = c(NMSE = "NMSE, centred", rmse = "RMSE", bias = "bias",
              pearson = "Pearson correlation", spearman = "Spearman correlation",
@@ -113,7 +113,7 @@ PANELS <- list(
 .burn  <- function(m, bf = EVAL$burn_frac) m[(floor(nrow(m) * bf) + 1):nrow(m), , drop = FALSE]
 .mcse  <- function(x) if (length(x) > 1) sd(x) / sqrt(length(x)) else NA_real_
 .ci    <- function(m) apply(m, 2, quantile, c(.025, .975))        # 95% interval, per column
-.short <- function(s) ifelse(s %in% names(SCEN), SCEN[s], s)
+.short <- function(s) ifelse(s %in% names(SCEN), SCEN[s], s)      # long name -> short label
 .shown <- function(d) d[!grepl("departed before last scan", d$quantity), , drop = FALSE]  # kept in the files only
 .sig   <- function(x) sub("\\.$", "", formatC(signif(x, 2), digits = 2, format = "fg", flag = "#"))
 
@@ -135,8 +135,8 @@ PANELS <- list(
 ##  truncated to (alpha_min, alpha_max]. Its parameters beyond the gamma
 ##  coefficients are the SHAPE kappa = 1/sigma_alpha and the SCALE lambda_i.
 ##
-##  The covariates are binary, so lambda_i takes four values, one per group.
-##  alpha_min and alpha_max are fixed settings, not estimated.
+
+## four covariate combinations (APOE4 x sex), each lambda_i
 GROUPS <- data.frame(label  = c("non-carrier male", "non-carrier female",
                                 "APOE4 carrier male", "APOE4 carrier female"),
                      apoe4  = c(0, 0, 1, 1), female = c(0, 1, 0, 1))
@@ -157,7 +157,7 @@ scalar_spec <- function() {
     stringsAsFactors = FALSE)
 }
 
-## m: matrix, one row per draw
+## m: matrix, one row per draw, and return the 16 quantities for each draw
 scalar_values <- function(m, x_centre) {
   g <- function(nm) m[, nm]
   lam <- sapply(seq_len(nrow(GROUPS)), function(k)
@@ -179,21 +179,25 @@ truth_matrix <- function(tr) {
 }
 
 ## ---- subject-level draws: alpha_i and delta_i (Table 1) -----------------
-##  The fit monitors x_tilde_i and z_i, not alpha_i and delta_i; both are
-##  rebuilt draw by draw exactly as subject_quantities() does (R/05_figures.R):
+##  The fit monitors x_tilde_i and z_i, not alpha_i and delta_i
+## Both are rebuilt draw by draw exactly as subject_quantities() does (R/05_figures.R):
 ##      delta_i = x_i' psi + sigma_delta * z_i
 ##      alpha_i = a_tilde_i - exp(-delta_i) { G_ext(x_tilde_i) - G(mu_b) }
 ##  using the global draw ALIGNED with each thinned subject draw.
 subject_draws <- function(fit) {
   bA <- fit$bA; S <- fit$settings; dat <- fit$dat; n <- dat$n_subj
-  pp <- pool_paired(fit, burn_frac = EVAL$burn_frac); g <- pp$g; u <- pp$u
+  pp <- pool_paired(fit, burn_frac = EVAL$burn_frac)
+  g <- pp$g # global parameters
+  u <- pp$u # subject parameters
   XT <- u[, sprintf("x_tilde[%d]", 1:n), drop = FALSE]
   ZZ <- u[, sprintf("z[%d]", 1:n), drop = FALSE]
-  K  <- nrow(g); AL <- DE <- matrix(NA_real_, K, n)
-  for (k in seq_len(K)) {
-    rgr <- rate_grid(bA, g[k, sprintf("theta[%d]", 1:bA$K)])
+  K  <- nrow(g); 
+  AL <- DE <- matrix(NA_real_, K, n)
+  for (k in seq_len(K)) { 
+    rgr <- rate_grid(bA, g[k, sprintf("theta[%d]", 1:bA$K)]) # rate curve
     G   <- clock_grid(bA, rgr, S$thresh)
-    mb  <- g[k, "mu_b"]; Gb <- sa_interp(bA$y, G, mb)
+    mb  <- g[k, "mu_b"]
+    Gb <- sa_interp(bA$y, G, mb)
     rb  <- max(sa_interp(bA$y, rgr, mb), S$r_min)
     delta  <- as.numeric(dat$X %*% g[k, grep("^psi", colnames(g))]) + g[k, "sigma_delta"] * ZZ[k, ]
     g0  <- ifelse(XT[k, ] >= mb, sa_interp(bA$y, G, XT[k, ]), Gb + (XT[k, ] - mb) / rb)
@@ -208,27 +212,18 @@ subject_draws <- function(fit) {
 ##  functional (Table 5). Every row carries error / sq_error (where the
 ##  quantity has units), nse (the normalised squared error) and covered.
 evaluate_one <- function(fit) {
-  S <- fit$settings; tr <- fit$truth; dat <- fit$dat
+  S <- fit$settings
+  tr <- fit$truth
+  dat <- fit$dat
   id <- data.frame(scenario = fit$scenario, rep = fit$rep, stringsAsFactors = FALSE)
   burned <- lapply(fit$chains, .burn)
-  rhat_of <- function(nms) max(sapply(nms, function(nm) .rhat(lapply(burned, function(m) m[, nm]))))
-
-  ## Tables 2-4: scalars --------------------------------------------------
-  sp <- scalar_spec()
-  xc <- as.numeric(dat$x_centre)
-  per_chain <- lapply(burned, scalar_values, x_centre = xc)
-  pooled <- do.call(rbind, per_chain)
-  est <- apply(pooled, 2, .est); q <- .ci(pooled)
-  tv  <- as.numeric(scalar_values(truth_matrix(tr), xc))
-  rh  <- sapply(seq_along(tv), function(j) .rhat(lapply(per_chain, function(m) m[, j])))
-  scal <- cbind(id, sp, truth = tv, estimate = est, error = est - tv, sq_error = (est - tv)^2,
-                nse = (est - tv)^2 / tv^2, covered = as.numeric(tv >= q[1, ] & tv <= q[2, ]), rhat = rh)
-
+  rhat_of <- function(nms) max(sapply(nms, function(nm) .rhat(lapply(burned, function(m) m[, nm])))) # worst rhat
+  
   ## Table 1: subject-specific random effects -------------------------------
   sd_  <- subject_draws(fit)
-  acc  <- which(fit$latent$Z == 1)
-  last <- dat$age_mat[cbind(seq_len(dat$n_subj), dat$n_obs)]
-  seen <- acc[fit$latent$alpha[acc] < last[acc]]
+  acc  <- which(fit$latent$Z == 1) # subjects who truly accumulate
+  last <- dat$age_mat[cbind(seq_len(dat$n_subj), dat$n_obs)] # age at last scan
+  seen <- acc[fit$latent$alpha[acc] < last[acc]] # accumulators whose true departure age is before last scan
   subj <- list()
   for (v in c("delta", "alpha")) {
     e <- apply(sd_[[v]], 2, .est); q <- .ci(sd_[[v]]); tru <- fit$latent[[v]]
@@ -248,17 +243,29 @@ evaluate_one <- function(fit) {
   }
   subj <- do.call(rbind, subj)
 
+  ## Tables 2-4: scalars --------------------------------------------------
+  sp <- scalar_spec()
+  xc <- as.numeric(dat$x_centre)
+  per_chain <- lapply(burned, scalar_values, x_centre = xc)
+  pooled <- do.call(rbind, per_chain)
+  est <- apply(pooled, 2, .est)
+  q <- .ci(pooled)
+  tv  <- as.numeric(scalar_values(truth_matrix(tr), xc))
+  rh  <- sapply(seq_along(tv), function(j) .rhat(lapply(per_chain, function(m) m[, j])))
+  scal <- cbind(id, sp, truth = tv, estimate = est, error = est - tv, sq_error = (est - tv)^2,
+                nse = (est - tv)^2 / tv^2, covered = as.numeric(tv >= q[1, ] & tv <= q[2, ]), rhat = rh)
+
   ## Table 5: functional objects ----------------------------------------
   draws <- do.call(rbind, burned)
   bA <- fit$bA; vA <- fit$vA
-  th <- sprintf("theta[%d]", 1:bA$K); nu <- sprintf("nu[%d]", 1:vA$K)
-  lo <- if (is.na(EVAL$r_range[1])) tr$mu_b else EVAL$r_range[1]
-  ky <- bA$y >= lo & bA$y <= EVAL$r_range[2]
-  Bk <- bA$B[ky, , drop = FALSE]
+  th <- sprintf("theta[%d]", 1:bA$K); nu <- sprintf("nu[%d]", 1:vA$K) # spline coefficients
+  lo <- if (is.na(EVAL$r_range[1])) tr$mu_b else EVAL$r_range[1] # lower end of scoring range
+  ky <- bA$y >= lo & bA$y <= EVAL$r_range[2] # select [lo, 1.30]
+  Bk <- bA$B[ky, , drop = FALSE] # basis
   r_true <- as.numeric(exp(Bk %*% tr$theta))
   Rd     <- exp(Bk %*% t(draws[, th]))
   r_hat  <- if (EVAL$estimator == "median") apply(Rd, 1, median) else rowMeans(Rd)
-  infl <- S$t_df / (S$t_df - 2)
+  infl <- S$t_df / (S$t_df - 2) # variance of student-t relative to its scale
   kv <- vA$y >= EVAL$var_range[1] & vA$y <= EVAL$var_range[2]
   Bv <- vA$B[kv, , drop = FALSE]
   v_true <- infl * as.numeric(exp(2 * Bv %*% tr$nu))
@@ -274,7 +281,7 @@ evaluate_one <- function(fit) {
     rhat = c(rhat_of(th[-1]), rhat_of(nu)),          # worst coefficient of the curve; theta[1] is fixed
     stringsAsFactors = FALSE))
 
-  list(scalar = scal, subject = subj, functional = func)
+  list(subject = subj, scalar = scal, functional = func)
 }
 
 ## ---- summarise the replicates: one row per quantity ----------------------
