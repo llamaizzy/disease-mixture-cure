@@ -1,0 +1,3 @@
+"scenario","component","quantity","n_sim","NMISE","NMISE_mcse","max_rhat"
+"baseline","functional object","rate curve r_A(y) on [0.585, 1.30]",5,0.00606500024788996,0.00132503326822854,1.0583161588971
+"baseline","functional object","measurement-error variance on [0.50, 1.30]",5,0.0143443049162937,0.0081261614186052,1.01018924239364

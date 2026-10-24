@@ -1,0 +1,6 @@
+"scenario","rep","n_dropped","n_subjects","pct_dropped","n_true_accumulators","n_near_top_kept"
+"baseline",1,0,1101,0,0,1
+"baseline",2,0,1101,0,0,5
+"baseline",3,0,1101,0,0,4
+"baseline",4,0,1101,0,0,2
+"baseline",5,2,1101,0.181653042688465,2,6
