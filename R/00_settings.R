@@ -90,6 +90,14 @@ SETTINGS_TAU <- modifyList(SETTINGS, list(
   theta1_sd  = 2.0,
   init_rise  = 6,           # initial curve rises x6 from floor to threshold
                             # (0.005 -> 0.03 /yr, the two regimes of [J20])
+  ## The adaptive random walk only where there are data to adapt to. Basis
+  ## functions 7-10 have support above 2.54 SUVR, where 1.5% of tau scans
+  ## sit; there the walk has a FIXED increment sd (as the noise curve does).
+  ## With the adaptive prior the tail coefficients made excursions to
+  ## log-rates of +0.7 and -12 (increment sd up to 30 allowed by the lambda
+  ## truncation), which produced heavy tails and R-hat 1.06 for theta_T[7:8].
+  rw_fixed_from = 7L,
+  rw_tail_sd    = 0.5,
 
   ## --- measurement scale omega_T(y): a 3-4% test-retest SD of the
   ##     DIFFERENCE of two scans ([D18] cerebellar, [T20]) at ~1.2 SUVR is
@@ -129,6 +137,8 @@ SETTINGS_JOINT <- list(
                             # has tau scans; "pairs": two biomarker blocks
   ## sampler changes after the first full fit (run_joint_model.R, changes 1-3)
   amy_block  = TRUE,        # AF_slice block over mu_b, sigma_alpha, phi[1]
+  tau_curve_split = 7L,     # theta_T[7:10] (basis support above ~2.5 SUVR, where
+                            # <2% of tau scans are) sampled in their own block
   subj_scales = c(x_tilde = 0.05, z = 1, x_tilde_T = 0.15, z_T = 1)
                             # initial proposal sds of the subject RW blocks
 )

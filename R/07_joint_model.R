@@ -68,14 +68,20 @@ build_joint_model <- function(dat, bA, vA, bT, vT,
     pi_bar <- 1 / (1 + exp(-phi[1]))
 
     ## ================= tau population ===================================
-    ## theta_T[1] is free (see SETTINGS_TAU): the random walk starts at it
+    ## theta_T[1] is free (see SETTINGS_TAU): the random walk starts at it.
+    ## The walk is ADAPTIVE where the data are (j < rw_fixed_from) and
+    ## FIXED-WIDTH above them: with no scans to adapt to, the truncated
+    ## local variances let the increment sd reach 30 and the tail
+    ## coefficients made excursions to log-rates of +0.7 and -12, which is
+    ## what the heavy tails and R-hat 1.06 of theta_T[7:8] were.
     theta_T[1] ~ dnorm(theta1_mean_T, sd = theta1_sd_T)
     sp_th_T ~ T(dgamma(1, 1), sp_min, sp_max)
-    for (j in 2:K_T) {
+    for (j in 2:(rw_fixed_from - 1)) {
       lam_sp_th_T[j] ~ T(dexp(1), lam_min, lam_max)
       sd_sp_th_T[j] <- sqrt(lam_sp_th_T[j] / sp_th_T)
       theta_T[j] ~ dnorm(theta_T[j-1], sd = sd_sp_th_T[j])
     }
+    for (j in rw_fixed_from:K_T) theta_T[j] ~ dnorm(theta_T[j-1], sd = rw_tail_sd)
     r_grid_T[1:ngrid_T] <- exp(Bh_T[1:ngrid_T, 1:K_T] %*% theta_T[1:K_T])
     G_grid_T[1:ngrid_T] <- nfClock(r_grid_T[1:ngrid_T], y_step_T, ngrid_T, y_lo_T,
                                    thresh_T, r_min)
@@ -192,6 +198,7 @@ build_joint_model <- function(dat, bA, vA, bT, vT,
     nu1_mean_T = ST$nu1_mean, mu_b_mean_T = ST$mu_b_mean, mu_b_sd_T = ST$mu_b_sd,
     phi1_mean_T = ST$phi1_mean, phi1_sd_T = ST$phi1_sd,
     g1_mean_T = log(ST$g1_age - SA$alpha_min),
+    rw_fixed_from = ST$rw_fixed_from, rw_tail_sd = ST$rw_tail_sd,
     sigma_b_sd_T = ST$sigma_b_sd, sigma_b_max_T = ST$sigma_b_max,
     ## coupling
     d_coup = SJ$d_coup, beta_sd = SJ$beta_sd,
@@ -209,7 +216,8 @@ build_joint_model <- function(dat, bA, vA, bT, vT,
     x_tilde = pmin(pmax(dat$x_init, bA$lo + 0.02), bA$hi - 0.02),
     b = pmin(dat$x_init, SA$thresh - 0.01),
     z = rep(0, dat$n_subj),
-    theta_T = thT, sp_th_T = 1, lam_sp_th_T = c(NA, rep(1, bT$K - 1)),
+    theta_T = thT, sp_th_T = 1,
+    lam_sp_th_T = c(NA, rep(1, ST$rw_fixed_from - 2)),   # only [2:(rw_fixed_from-1)] exist
     nu_T = rep(ST$nu1_mean, vT$K),
     mu_b_T = min(ST$mu_b_mean, ST$thresh - 0.05),
     gamma_T = c(log(ST$g1_age - SA$alpha_min), rep(0, ncol(Xg) - 1)),
