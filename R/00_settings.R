@@ -139,6 +139,9 @@ SETTINGS_JOINT <- list(
   amy_block  = TRUE,        # AF_slice block over mu_b, sigma_alpha, phi[1]
   tau_curve_split = 7L,     # theta_T[7:10] (basis support above ~2.5 SUVR, where
                             # <2% of tau scans are) sampled in their own block
+  ## after the 150k diagnosis (posterior 75k NEO modified/rhat_diagnosis.md)
+  tau_onset_block = TRUE,   # gamma_T[2:3] join the tau curve block with gamma_T[1]
+  floor_shift     = TRUE,   # interweaving floor-shift sampler on mu_b and mu_b_T
   subj_scales = c(x_tilde = 0.05, z = 1, x_tilde_T = 0.15, z_T = 1)
                             # initial proposal sds of the subject RW blocks
 )
